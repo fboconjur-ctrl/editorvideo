@@ -69,6 +69,16 @@
     <label><input type="checkbox" id="upscale" /> Aumentar resolução (2x, nitidez)</label>
     <label><input type="checkbox" id="subtitles" checked /> Gerar legendas automáticas</label>
     <label><input type="checkbox" id="burnIn" checked /> Queimar legendas no vídeo</label>
+    <label id="subtitleOptions" style="margin-left: 24px; gap: 16px;">
+      Tamanho da fonte:
+      <input type="number" id="subtitleFontSize" placeholder="auto" min="8" max="200" style="width: 70px;" />
+      Posição:
+      <select id="subtitlePosition">
+        <option value="bottom" selected>Embaixo</option>
+        <option value="middle">Meio</option>
+        <option value="top">Em cima</option>
+      </select>
+    </label>
 
     <button id="submitBtn">Processar vídeo</button>
 
@@ -172,6 +182,8 @@
       formData.append("upscale_enabled", document.getElementById("upscale").checked);
       formData.append("subtitles_enabled", document.getElementById("subtitles").checked);
       formData.append("burn_in", document.getElementById("burnIn").checked);
+      formData.append("subtitle_font_size", document.getElementById("subtitleFontSize").value || 0);
+      formData.append("subtitle_position", document.getElementById("subtitlePosition").value);
 
       try {
         const res = await fetch(`${API_BASE}/api/jobs`, { method: "POST", body: formData });

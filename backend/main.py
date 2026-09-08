@@ -77,6 +77,8 @@ def _run_pipeline(
     upscale_enabled: bool,
     subtitles_enabled: bool,
     burn_in: bool,
+    subtitle_font_size: int | None,
+    subtitle_position: str,
 ) -> None:
     job = JOBS[job_id]
     job_dir = OUTPUTS_DIR / job_id
@@ -140,7 +142,10 @@ def _run_pipeline(
 
             if burn_in:
                 final_video = job_dir / "final.mp4"
-                burn_subtitles(current_video, srt_path, final_video)
+                burn_subtitles(
+                    current_video, srt_path, final_video,
+                    font_size=subtitle_font_size, position=subtitle_position,
+                )
                 current_video = final_video
 
         final_output = job_dir / f"resultado{current_video.suffix}"
@@ -169,6 +174,8 @@ async def create_job(
     upscale_enabled: bool = Form(False),
     subtitles_enabled: bool = Form(True),
     burn_in: bool = Form(True),
+    subtitle_font_size: int = Form(0),
+    subtitle_position: str = Form("bottom"),
 ) -> Job:
     job_id = str(uuid.uuid4())
     job_upload_dir = UPLOADS_DIR / job_id
@@ -194,6 +201,8 @@ async def create_job(
         upscale_enabled,
         subtitles_enabled,
         burn_in,
+        subtitle_font_size or None,
+        subtitle_position,
     )
     return job
 

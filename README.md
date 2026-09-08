@@ -69,6 +69,10 @@ Backend correspondente: `POST /api/uploads` (sobe o vídeo sem processar) e
 3. Correção automática de cor e normalização de áudio (via ffmpeg `normalize`/`eq`/`loudnorm`).
 4. Transcrição local do áudio (via `faster-whisper`).
 5. Geração de legendas `.srt`, com opção de "queimar" (burn-in) no vídeo.
+   O tamanho da fonte é calculado automaticamente com base na resolução do
+   vídeo (proporcional à altura), evitando legendas minúsculas em vídeos
+   grandes ou gigantes em vídeos verticais pequenos — mas dá pra sobrescrever
+   manualmente (tamanho fixo e posição: embaixo/meio/em cima) na interface.
 6. Download do vídeo final + arquivo de legenda.
 
 Remoção de fundo (opcional): usa `rembg` (modelo `u2net`) processando o
