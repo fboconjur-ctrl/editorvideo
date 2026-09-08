@@ -79,7 +79,9 @@
 <body>
   <h1>Video Editor Local</h1>
   <p class="sub">Corte de silêncio + legendas automáticas, tudo rodando na sua máquina.</p>
-  <p><a href="timeline.html" style="color:#4f8cff;text-decoration:none;">✂ Ir para o editor manual (timeline) &rarr;</a></p>
+  <p><a href="timeline.html" style="color:#4f8cff;text-decoration:none;">✂ Ir para o editor manual (timeline) &rarr;</a>
+  &nbsp;|&nbsp;
+  <a href="tools.html" style="color:#4f8cff;text-decoration:none;">🎙 Ferramentas extras (transcrição, texto-pra-voz) &rarr;</a></p>
 
   <div class="card">
     <input type="file" id="fileInput" accept="video/*" />
@@ -273,10 +275,17 @@
       }
 
       if (job.status === "error") {
-        markStepsUpToDone(lastStatus);
-        const li = stepsEl.querySelector("li.active") || stepsEl.firstElementChild;
-        if (li) { li.classList.add("error"); li.classList.remove("active"); li.querySelector(".icon").textContent = "✕"; }
-        stepsEl.insertAdjacentHTML("beforeend", `<li class="error">Erro: ${job.error}</li>`);
+        // Não dá pra saber com certeza em qual etapa exata falhou (etapas
+        // rápidas podem terminar entre duas consultas de status) — então só
+        // marcamos como concluídas as etapas anteriores à última observada,
+        // deixamos o resto pendente, e mostramos o erro real por extenso.
+        const order = ["uploading", ...activeSteps.map((s) => s.key), "done"];
+        const lastIndex = order.indexOf(lastStatus);
+        order.forEach((key, i) => { if (i < lastIndex) setStepState(key, "done"); });
+        stepsEl.insertAdjacentHTML(
+          "beforeend",
+          `<li class="error">✕ Falha durante o processamento (depois da etapa "${STEP_DEFS.find((s) => s.key === lastStatus)?.label ?? lastStatus}"). Erro: ${job.error}</li>`
+        );
         submitBtn.disabled = false;
         return;
       }

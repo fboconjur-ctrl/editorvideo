@@ -21,6 +21,7 @@ from pipeline.stabilize import stabilize
 from pipeline.subtitles import burn_subtitles, write_srt
 from pipeline.timeline_render import render_edl
 from pipeline.transcribe import transcribe
+from pipeline.tts import synthesize_speech
 from pipeline.upscale import upscale
 
 BASE_DIR = Path(__file__).parent
@@ -367,3 +368,129 @@ async def get_render(job_id: str) -> RenderJob:
 async def download_render(job_id: str) -> FileResponse:
     job = RENDER_JOBS[job_id]
     return FileResponse(job.result_video, filename="resultado.mp4")
+
+
+# --- Transcrição avulsa ----------------------------------------------------
+# Sobe um vídeo/áudio e recebe de volta um .txt e um .srt, sem rodar
+# nenhuma outra etapa do pipeline.
+
+TranscriptionStatus = Literal["queued", "transcribing", "done", "error"]
+
+
+class TranscriptionJob(BaseModel):
+    id: str
+    status: TranscriptionStatus = "queued"
+    error: str | None = None
+    result_txt: str | None = None
+    result_srt: str | None = None
+
+
+TRANSCRIPTION_JOBS: dict[str, TranscriptionJob] = {}
+
+
+def _run_transcription(job_id: str, input_path: Path) -> None:
+    job = TRANSCRIPTION_JOBS[job_id]
+    try:
+        job.status = "transcribing"
+        segments = transcribe(input_path)
+
+        job_dir = OUTPUTS_DIR / job_id
+        job_dir.mkdir(exist_ok=True)
+
+        txt_path = job_dir / "transcricao.txt"
+        txt_path.write_text("\n".join(s.text for s in segments), encoding="utf-8")
+
+        srt_path = job_dir / "transcricao.srt"
+        write_srt(segments, srt_path)
+
+        job.result_txt = str(txt_path)
+        job.result_srt = str(srt_path)
+        job.status = "done"
+    except Exception as exc:  # noqa: BLE001
+        job.status = "error"
+        job.error = str(exc)
+
+
+@app.post("/api/transcriptions")
+async def create_transcription(background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> TranscriptionJob:
+    job_id = str(uuid.uuid4())
+    upload_dir = UPLOADS_DIR / job_id
+    upload_dir.mkdir(parents=True)
+
+    input_path = upload_dir / "input.mp4"
+    with input_path.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    job = TranscriptionJob(id=job_id)
+    TRANSCRIPTION_JOBS[job_id] = job
+    background_tasks.add_task(_run_transcription, job_id, input_path)
+    return job
+
+
+@app.get("/api/transcriptions/{job_id}")
+async def get_transcription(job_id: str) -> TranscriptionJob:
+    return TRANSCRIPTION_JOBS[job_id]
+
+
+@app.get("/api/transcriptions/{job_id}/txt")
+async def download_transcription_txt(job_id: str) -> FileResponse:
+    job = TRANSCRIPTION_JOBS[job_id]
+    return FileResponse(job.result_txt, filename="transcricao.txt")
+
+
+@app.get("/api/transcriptions/{job_id}/srt")
+async def download_transcription_srt(job_id: str) -> FileResponse:
+    job = TRANSCRIPTION_JOBS[job_id]
+    return FileResponse(job.result_srt, filename="transcricao.srt")
+
+
+# --- Texto para voz (TTS) ---------------------------------------------------
+
+TtsStatus = Literal["queued", "generating", "done", "error"]
+
+
+class TtsJob(BaseModel):
+    id: str
+    status: TtsStatus = "queued"
+    error: str | None = None
+    result_audio: str | None = None
+
+
+TTS_JOBS: dict[str, TtsJob] = {}
+
+
+def _run_tts(job_id: str, text: str, rate: int | None) -> None:
+    job = TTS_JOBS[job_id]
+    try:
+        job.status = "generating"
+        job_dir = OUTPUTS_DIR / job_id
+        job_dir.mkdir(exist_ok=True)
+        output_path = job_dir / "voz.wav"
+
+        synthesize_speech(text, output_path, rate=rate)
+
+        job.result_audio = str(output_path)
+        job.status = "done"
+    except Exception as exc:  # noqa: BLE001
+        job.status = "error"
+        job.error = str(exc)
+
+
+@app.post("/api/tts")
+async def create_tts(background_tasks: BackgroundTasks, text: str = Form(...), rate: int = Form(0)) -> TtsJob:
+    job_id = str(uuid.uuid4())
+    job = TtsJob(id=job_id)
+    TTS_JOBS[job_id] = job
+    background_tasks.add_task(_run_tts, job_id, text, rate or None)
+    return job
+
+
+@app.get("/api/tts/{job_id}")
+async def get_tts(job_id: str) -> TtsJob:
+    return TTS_JOBS[job_id]
+
+
+@app.get("/api/tts/{job_id}/audio")
+async def download_tts(job_id: str) -> FileResponse:
+    job = TTS_JOBS[job_id]
+    return FileResponse(job.result_audio, filename="voz.wav")

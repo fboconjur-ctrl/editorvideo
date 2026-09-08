@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ferramentas extras</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, sans-serif;
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 16px;
+    background: #0f1115;
+    color: #e8e8e8;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 2px; }
+  h2 { font-size: 1.05rem; }
+  p.sub { color: #9aa0a6; margin-top: 0; }
+  a.nav-link { color: #4f8cff; text-decoration: none; font-size: 0.9rem; }
+  .card {
+    background: #171a21;
+    border: 1px solid #2a2e37;
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 20px;
+  }
+  textarea, input[type="file"] { width: 100%; box-sizing: border-box; }
+  textarea {
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid #2a2e37;
+    background: #0f1115;
+    color: #e8e8e8;
+    font-family: inherit;
+    resize: vertical;
+  }
+  label { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; font-size: 0.9rem; color: #c7cbd1; }
+  button {
+    background: #4f8cff;
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    margin-top: 12px;
+  }
+  button:disabled { background: #3a3f4b; cursor: not-allowed; }
+  .status { margin-top: 12px; font-size: 0.9rem; color: #9aa0a6; }
+  .downloads { margin-top: 12px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .downloads a {
+    color: #4f8cff;
+    text-decoration: none;
+    border: 1px solid #4f8cff;
+    padding: 8px 14px;
+    border-radius: 8px;
+  }
+  audio { width: 100%; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <h1>Ferramentas extras</h1>
+  <p class="sub">Transcrição avulsa e texto-para-voz, tudo local.</p>
+  <p><a class="nav-link" href="index.html">&larr; Voltar para edição automática</a></p>
+
+  <div class="card">
+    <h2>🎙 Transcrever vídeo/áudio</h2>
+    <p class="sub">Sobe um arquivo e recebe de volta o texto e a legenda (.srt), sem editar o vídeo.</p>
+    <input type="file" id="transcribeFile" accept="video/*,audio/*" />
+    <button id="transcribeBtn">Transcrever</button>
+    <div class="status" id="transcribeStatus"></div>
+    <div class="downloads" id="transcribeDownloads" hidden>
+      <a id="downloadTxt" href="#">Baixar texto (.txt)</a>
+      <a id="downloadSrt" href="#">Baixar legenda (.srt)</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🔊 Texto para voz</h2>
+    <p class="sub">Gera um áudio narrado a partir de um texto, usando as vozes já instaladas no seu sistema.</p>
+    <label>Texto
+      <textarea id="ttsText" rows="5" placeholder="Digite o texto que vai virar narração..."></textarea>
+    </label>
+    <label>Velocidade da fala (deixe em branco para o padrão do sistema)
+      <input type="number" id="ttsRate" placeholder="ex: 150 (palavras por minuto)" />
+    </label>
+    <button id="ttsBtn">Gerar áudio</button>
+    <div class="status" id="ttsStatus"></div>
+    <div class="downloads" id="ttsDownloads" hidden>
+      <a id="downloadAudio" href="#">Baixar áudio (.wav)</a>
+    </div>
+    <audio id="ttsPreview" controls hidden></audio>
+  </div>
+
+  <script>
+    const API_BASE = "http://localhost:8000";
+
+    // --- Transcrição ---------------------------------------------------------
+
+    const transcribeFile = document.getElementById("transcribeFile");
+    const transcribeBtn = document.getElementById("transcribeBtn");
+    const transcribeStatus = document.getElementById("transcribeStatus");
+    const transcribeDownloads = document.getElementById("transcribeDownloads");
+    const downloadTxtEl = document.getElementById("downloadTxt");
+    const downloadSrtEl = document.getElementById("downloadSrt");
+
+    transcribeBtn.addEventListener("click", async () => {
+      const file = transcribeFile.files[0];
+      if (!file) {
+        transcribeStatus.textContent = "Selecione um arquivo primeiro.";
+        return;
+      }
+
+      transcribeBtn.disabled = true;
+      transcribeDownloads.hidden = true;
+      transcribeStatus.textContent = "Enviando arquivo...";
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api/transcriptions`, { method: "POST", body: formData });
+      } catch (err) {
+        transcribeStatus.textContent = "Não foi possível conectar ao servidor. Verifique se ele está rodando.";
+        transcribeBtn.disabled = false;
+        return;
+      }
+      if (!res.ok) {
+        transcribeStatus.textContent = `Falha ao enviar (HTTP ${res.status}).`;
+        transcribeBtn.disabled = false;
+        return;
+      }
+
+      const job = await res.json();
+      pollTranscription(job.id);
+    });
+
+    async function pollTranscription(jobId) {
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api/transcriptions/${jobId}`);
+      } catch (err) {
+        transcribeStatus.textContent = "Conexão perdida com o servidor.";
+        transcribeBtn.disabled = false;
+        return;
+      }
+      const job = await res.json();
+
+      if (job.status === "done") {
+        transcribeStatus.textContent = "Transcrição concluída!";
+        transcribeDownloads.hidden = false;
+        downloadTxtEl.href = `${API_BASE}/api/transcriptions/${jobId}/txt`;
+        downloadSrtEl.href = `${API_BASE}/api/transcriptions/${jobId}/srt`;
+        transcribeBtn.disabled = false;
+        return;
+      }
+      if (job.status === "error") {
+        transcribeStatus.textContent = `Erro: ${job.error}`;
+        transcribeBtn.disabled = false;
+        return;
+      }
+
+      transcribeStatus.textContent = "Transcrevendo áudio (pode demorar um pouco)...";
+      setTimeout(() => pollTranscription(jobId), 2000);
+    }
+
+    // --- Texto para voz --------------------------------------------------------
+
+    const ttsText = document.getElementById("ttsText");
+    const ttsRate = document.getElementById("ttsRate");
+    const ttsBtn = document.getElementById("ttsBtn");
+    const ttsStatus = document.getElementById("ttsStatus");
+    const ttsDownloads = document.getElementById("ttsDownloads");
+    const downloadAudioEl = document.getElementById("downloadAudio");
+    const ttsPreview = document.getElementById("ttsPreview");
+
+    ttsBtn.addEventListener("click", async () => {
+      const text = ttsText.value.trim();
+      if (!text) {
+        ttsStatus.textContent = "Digite um texto primeiro.";
+        return;
+      }
+
+      ttsBtn.disabled = true;
+      ttsDownloads.hidden = true;
+      ttsPreview.hidden = true;
+      ttsStatus.textContent = "Gerando áudio...";
+
+      const formData = new FormData();
+      formData.append("text", text);
+      formData.append("rate", ttsRate.value || 0);
+
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api/tts`, { method: "POST", body: formData });
+      } catch (err) {
+        ttsStatus.textContent = "Não foi possível conectar ao servidor. Verifique se ele está rodando.";
+        ttsBtn.disabled = false;
+        return;
+      }
+      if (!res.ok) {
+        ttsStatus.textContent = `Falha ao gerar (HTTP ${res.status}).`;
+        ttsBtn.disabled = false;
+        return;
+      }
+
+      const job = await res.json();
+      pollTts(job.id);
+    });
+
+    async function pollTts(jobId) {
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api/tts/${jobId}`);
+      } catch (err) {
+        ttsStatus.textContent = "Conexão perdida com o servidor.";
+        ttsBtn.disabled = false;
+        return;
+      }
+      const job = await res.json();
+
+      if (job.status === "done") {
+        ttsStatus.textContent = "Áudio gerado!";
+        ttsDownloads.hidden = false;
+        downloadAudioEl.href = `${API_BASE}/api/tts/${jobId}/audio`;
+        ttsPreview.src = `${API_BASE}/api/tts/${jobId}/audio`;
+        ttsPreview.hidden = false;
+        ttsBtn.disabled = false;
+        return;
+      }
+      if (job.status === "error") {
+        ttsStatus.textContent = `Erro: ${job.error}`;
+        ttsBtn.disabled = false;
+        return;
+      }
+
+      setTimeout(() => pollTts(jobId), 1500);
+    }
+  </script>
+</body>
+</html>

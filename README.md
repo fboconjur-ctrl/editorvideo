@@ -123,6 +123,15 @@ sem depender de GPU/modelo. Uma versão com IA real pode ser adicionada
 depois integrando Real-ESRGAN, mas isso exige baixar um modelo maior e
 idealmente rodar em GPU.
 
+## Ferramentas extras (`frontend/tools.html`)
+
+- **Transcrever vídeo/áudio**: sobe um arquivo e recebe de volta o texto
+  (`.txt`) e a legenda (`.srt`), sem mexer no vídeo. Útil pra tirar uma
+  transcrição rápida de uma entrevista/reunião/podcast.
+- **Texto para voz**: gera um áudio narrado a partir de texto digitado,
+  usando `pyttsx3` — no Windows usa as vozes SAPI5 já instaladas no
+  sistema (Narrador), sem precisar de internet nem baixar modelo.
+
 ## Roadmap
 
 - Interpolação de frames / slow-motion suave (ex: integrar RIFE)
