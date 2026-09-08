@@ -8,7 +8,7 @@
   :root { color-scheme: light dark; }
   body {
     font-family: system-ui, sans-serif;
-    max-width: 960px;
+    max-width: 980px;
     margin: 30px auto;
     padding: 0 16px;
     background: #0f1115;
@@ -25,17 +25,20 @@
     padding: 20px;
     margin-top: 16px;
   }
-  .video-wrap { position: relative; }
+  .video-wrap { position: relative; user-select: none; }
   video { width: 100%; border-radius: 8px; background: #000; display: block; }
-  #textPreviewLayer { position: absolute; inset: 0; pointer-events: none; }
+  #textPreviewLayer { position: absolute; inset: 0; }
   .text-overlay-preview {
     position: absolute;
-    pointer-events: none;
     text-shadow: 0 0 3px #000, 0 0 6px #000;
     font-weight: 600;
     white-space: nowrap;
     transform: translate(-50%, -50%);
+    cursor: move;
+    padding: 2px 6px;
+    border: 1px dashed transparent;
   }
+  .text-overlay-preview:hover { border-color: #4f8cff; }
   .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; align-items: center; }
   button {
     background: #4f8cff;
@@ -49,15 +52,19 @@
   button.secondary { background: #2a2e37; }
   button.danger { background: #d9534f; }
   button:disabled { background: #3a3f4b; cursor: not-allowed; }
+
   #timeline {
-    display: flex;
-    height: 64px;
+    position: relative;
+    height: 68px;
     border-radius: 8px;
-    overflow: hidden;
+    background: #0a0c10;
     border: 1px solid #2a2e37;
-    margin-top: 8px;
+    margin-top: 10px;
+    display: flex;
+    user-select: none;
   }
   .segment {
+    position: relative;
     height: 100%;
     display: flex;
     align-items: center;
@@ -72,6 +79,29 @@
   }
   .segment.selected { background: #ff9f43; color: #1a1300; font-weight: bold; }
   .segment:hover { filter: brightness(1.15); }
+  .handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 10px;
+    cursor: ew-resize;
+    background: rgba(255, 255, 255, 0.25);
+    z-index: 2;
+  }
+  .handle:hover { background: rgba(255, 255, 255, 0.5); }
+  .handle-left { left: 0; }
+  .handle-right { right: 0; }
+  .playhead {
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    width: 2px;
+    background: #ff4757;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .timeline-hint { color: #9aa0a6; font-size: 0.8rem; margin-top: 4px; }
+
   #status { margin-top: 14px; color: #9aa0a6; font-size: 0.9rem; }
   #resultBlock { margin-top: 16px; display: none; }
   #resultBlock video { margin-top: 8px; }
@@ -120,9 +150,12 @@
         <button id="moveRightBtn" class="secondary">Mover ▶</button>
         <button id="playEditBtn" class="secondary">▶ Reproduzir edição</button>
       </div>
-      <p class="hint">Clique num bloco da timeline pra selecionar. "Dividir" corta o bloco selecionado no tempo atual do player.</p>
 
       <div id="timeline"></div>
+      <p class="timeline-hint">
+        Clique na timeline pra pular o vídeo pro ponto clicado. Arraste as bordas de um bloco pra
+        cortar o início/fim. Clique no meio de um bloco pra selecioná-lo (some seus ajustes abaixo).
+      </p>
 
       <div id="segmentProps" style="display:none;">
         <h2 style="margin-top:16px;">Ajustes do trecho selecionado</h2>
@@ -148,7 +181,7 @@
       </div>
 
       <h2 style="margin-top:24px;">Textos na tela</h2>
-      <p class="hint">Tempos são relativos ao vídeo final editado (o que você vê em "Reproduzir edição"), não ao vídeo original.</p>
+      <p class="hint">Depois de adicionar, arraste o texto direto em cima do vídeo pra posicionar. Tempos são relativos ao vídeo final editado.</p>
       <div class="text-form">
         <label>Texto
           <input type="text" id="textContent" placeholder="Digite o texto" />
@@ -158,12 +191,6 @@
         </label>
         <label>Fim (s)
           <input type="number" id="textEnd" min="0" step="0.1" value="2" />
-        </label>
-        <label>Posição X (%)
-          <input type="range" id="textX" min="0" max="100" value="50" />
-        </label>
-        <label>Posição Y (%)
-          <input type="range" id="textY" min="0" max="100" value="85" />
         </label>
         <label>Tamanho
           <input type="number" id="textSize" min="10" max="150" value="36" />
@@ -191,6 +218,7 @@
 
   <script>
     const API_BASE = "http://localhost:8000";
+    const MIN_SEGMENT_LENGTH = 0.1;
 
     const fileInput = document.getElementById("fileInput");
     const statusEl = document.getElementById("status");
@@ -210,15 +238,42 @@
     const textPreviewLayer = document.getElementById("textPreviewLayer");
 
     let uploadId = null;
-    let totalDuration = 0;
-    let segments = []; // [{start, end, speed, volume, color_filter}]
+    let totalDuration = 0; // duração do vídeo original enviado
+    let segments = []; // [{start, end, speed, volume, color_filter}], na ordem final
     let texts = []; // [{text, start, end, x_percent, y_percent, font_size, color}]
     let selectedIndex = null;
-    let playingEditIndex = null;
+    let playingEditIndex = null; // índice do segmento tocando durante "reproduzir edição"
+    let resizeDrag = null; // {index, side, startX, startVal, pxPerSec}
+    let textDrag = null; // {index}
+    let suppressNextTimelineClick = false;
 
     function newSegment(start, end) {
       return { start, end, speed: 1.0, volume: 1.0, color_filter: "none" };
     }
+
+    function totalKeptDuration() {
+      return segments.reduce((sum, s) => sum + (s.end - s.start), 0);
+    }
+
+    function flattenedTimeAt(index, originalTime) {
+      let t = 0;
+      for (let i = 0; i < index; i++) t += segments[i].end - segments[i].start;
+      return t + (originalTime - segments[index].start);
+    }
+
+    function segmentAndTimeFromFlattened(flatTime) {
+      let t = Math.max(0, flatTime);
+      for (let i = 0; i < segments.length; i++) {
+        const dur = segments[i].end - segments[i].start;
+        if (t <= dur || i === segments.length - 1) {
+          return { index: i, originalTime: segments[i].start + Math.max(0, Math.min(t, dur)) };
+        }
+        t -= dur;
+      }
+      return { index: 0, originalTime: segments[0].start };
+    }
+
+    // --- Timeline: blocos, handles de corte e playhead ----------------------
 
     function renderTimeline() {
       timelineEl.innerHTML = "";
@@ -227,18 +282,47 @@
         block.className = "segment" + (i === selectedIndex ? " selected" : "");
         block.style.flex = `${Math.max(seg.end - seg.start, 0.01)} 0 0`;
         block.textContent = `${seg.start.toFixed(1)}s–${seg.end.toFixed(1)}s`;
-        block.addEventListener("click", () => {
+
+        const leftHandle = document.createElement("div");
+        leftHandle.className = "handle handle-left";
+        leftHandle.addEventListener("mousedown", (e) => startResize(e, i, "left"));
+
+        const rightHandle = document.createElement("div");
+        rightHandle.className = "handle handle-right";
+        rightHandle.addEventListener("mousedown", (e) => startResize(e, i, "right"));
+
+        block.appendChild(leftHandle);
+        block.appendChild(rightHandle);
+
+        block.addEventListener("click", (e) => {
+          if (suppressNextTimelineClick || e.target !== block) {
+            suppressNextTimelineClick = false;
+            return;
+          }
           selectedIndex = i;
           renderTimeline();
-          showSegmentProps();
         });
+
         timelineEl.appendChild(block);
       });
+
+      const playhead = document.createElement("div");
+      playhead.className = "playhead";
+      playhead.id = "playheadEl";
+      const kept = totalKeptDuration();
+      if (kept > 0 && playingEditIndex !== null) {
+        const flatT = flattenedTimeAt(playingEditIndex, previewEl.currentTime);
+        playhead.style.left = `${Math.max(0, Math.min(100, (flatT / kept) * 100))}%`;
+      } else {
+        playhead.style.display = "none";
+      }
+      timelineEl.appendChild(playhead);
+
       showSegmentProps();
     }
 
     function showSegmentProps() {
-      if (selectedIndex === null) {
+      if (selectedIndex === null || !segments[selectedIndex]) {
         segmentProps.style.display = "none";
         return;
       }
@@ -266,6 +350,57 @@
       segments[selectedIndex].color_filter = segColorFilterEl.value;
     });
 
+    // Arrastar bordas dos blocos para cortar início/fim -----------------------
+
+    function startResize(e, index, side) {
+      e.stopPropagation();
+      e.preventDefault();
+      suppressNextTimelineClick = true;
+      const kept = totalKeptDuration();
+      const pxPerSec = timelineEl.clientWidth / Math.max(kept, 0.01);
+      resizeDrag = { index, side, startX: e.clientX, startVal: side === "left" ? segments[index].start : segments[index].end, pxPerSec };
+      window.addEventListener("mousemove", onResizeMove);
+      window.addEventListener("mouseup", onResizeEnd);
+    }
+
+    function onResizeMove(e) {
+      if (!resizeDrag) return;
+      const deltaSec = (e.clientX - resizeDrag.startX) / resizeDrag.pxPerSec;
+      const seg = segments[resizeDrag.index];
+      if (resizeDrag.side === "left") {
+        seg.start = Math.max(0, Math.min(resizeDrag.startVal + deltaSec, seg.end - MIN_SEGMENT_LENGTH));
+      } else {
+        seg.end = Math.min(totalDuration, Math.max(resizeDrag.startVal + deltaSec, seg.start + MIN_SEGMENT_LENGTH));
+      }
+      renderTimeline();
+    }
+
+    function onResizeEnd() {
+      resizeDrag = null;
+      window.removeEventListener("mousemove", onResizeMove);
+      window.removeEventListener("mouseup", onResizeEnd);
+    }
+
+    // Clicar na timeline pula o vídeo pro ponto clicado -----------------------
+
+    timelineEl.addEventListener("click", (e) => {
+      if (suppressNextTimelineClick) {
+        suppressNextTimelineClick = false;
+        return;
+      }
+      const rect = timelineEl.getBoundingClientRect();
+      const kept = totalKeptDuration();
+      if (kept <= 0) return;
+      const flatT = ((e.clientX - rect.left) / rect.width) * kept;
+      const { index, originalTime } = segmentAndTimeFromFlattened(flatT);
+      selectedIndex = index;
+      playingEditIndex = index;
+      previewEl.currentTime = originalTime;
+      renderTimeline();
+    });
+
+    // --- Textos: lista, prévia arrastável no vídeo --------------------------
+
     function renderTextList() {
       textList.innerHTML = "";
       texts.forEach((t, i) => {
@@ -285,6 +420,46 @@
       });
     }
 
+    function renderTextPreview() {
+      textPreviewLayer.innerHTML = "";
+      if (!previewEl.videoHeight) return;
+      const scale = previewEl.clientHeight / previewEl.videoHeight;
+      texts.forEach((t, i) => {
+        const box = document.createElement("div");
+        box.className = "text-overlay-preview";
+        box.style.left = `${t.x_percent}%`;
+        box.style.top = `${t.y_percent}%`;
+        box.style.fontSize = `${Math.max(8, t.font_size * scale)}px`;
+        box.style.color = t.color;
+        box.textContent = t.text;
+        box.addEventListener("mousedown", (e) => startTextDrag(e, i));
+        textPreviewLayer.appendChild(box);
+      });
+    }
+
+    function startTextDrag(e, index) {
+      e.preventDefault();
+      textDrag = { index };
+      window.addEventListener("mousemove", onTextDragMove);
+      window.addEventListener("mouseup", onTextDragEnd);
+    }
+
+    function onTextDragMove(e) {
+      if (!textDrag) return;
+      const rect = previewEl.getBoundingClientRect();
+      const xPercent = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+      const yPercent = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+      texts[textDrag.index].x_percent = xPercent;
+      texts[textDrag.index].y_percent = yPercent;
+      renderTextPreview();
+    }
+
+    function onTextDragEnd() {
+      textDrag = null;
+      window.removeEventListener("mousemove", onTextDragMove);
+      window.removeEventListener("mouseup", onTextDragEnd);
+    }
+
     document.getElementById("addTextBtn").addEventListener("click", () => {
       const text = document.getElementById("textContent").value.trim();
       if (!text) return;
@@ -292,8 +467,8 @@
         text,
         start: Number(document.getElementById("textStart").value) || 0,
         end: Number(document.getElementById("textEnd").value) || 2,
-        x_percent: Number(document.getElementById("textX").value),
-        y_percent: Number(document.getElementById("textY").value),
+        x_percent: 50,
+        y_percent: 85,
         font_size: Number(document.getElementById("textSize").value) || 36,
         color: document.getElementById("textColor").value || "white",
       });
@@ -302,24 +477,10 @@
       renderTextPreview();
     });
 
-    function renderTextPreview() {
-      textPreviewLayer.innerHTML = "";
-      if (!previewEl.videoHeight) return;
-      const scale = previewEl.clientHeight / previewEl.videoHeight;
-      texts.forEach((t) => {
-        const box = document.createElement("div");
-        box.className = "text-overlay-preview";
-        box.style.left = `${t.x_percent}%`;
-        box.style.top = `${t.y_percent}%`;
-        box.style.fontSize = `${Math.max(8, t.font_size * scale)}px`;
-        box.style.color = t.color;
-        box.textContent = t.text;
-        textPreviewLayer.appendChild(box);
-      });
-    }
-
     previewEl.addEventListener("loadedmetadata", renderTextPreview);
-    window.addEventListener("resize", renderTextPreview);
+    window.addEventListener("resize", () => { renderTextPreview(); renderTimeline(); });
+
+    // --- Upload -------------------------------------------------------------
 
     fileInput.addEventListener("change", async () => {
       const file = fileInput.files[0];
@@ -351,6 +512,7 @@
       segments = [newSegment(0, totalDuration)];
       texts = [];
       selectedIndex = 0;
+      playingEditIndex = null;
 
       statusEl.textContent = `Vídeo carregado (${totalDuration.toFixed(1)}s).`;
       editorArea.style.display = "block";
@@ -359,6 +521,8 @@
       renderTextList();
       renderTextPreview();
     });
+
+    // --- Botões de edição -----------------------------------------------------
 
     document.getElementById("splitBtn").addEventListener("click", () => {
       if (selectedIndex === null) return;
@@ -381,6 +545,7 @@
       }
       segments.splice(selectedIndex, 1);
       selectedIndex = Math.max(0, selectedIndex - 1);
+      playingEditIndex = null;
       renderTimeline();
     });
 
@@ -408,6 +573,7 @@
     previewEl.addEventListener("timeupdate", () => {
       if (playingEditIndex === null) return;
       const seg = segments[playingEditIndex];
+      if (!seg) { playingEditIndex = null; return; }
       if (previewEl.currentTime >= seg.end - 0.02) {
         playingEditIndex += 1;
         if (playingEditIndex >= segments.length) {
@@ -417,7 +583,10 @@
           previewEl.currentTime = segments[playingEditIndex].start;
         }
       }
+      renderTimeline();
     });
+
+    // --- Exportação -----------------------------------------------------------
 
     document.getElementById("exportBtn").addEventListener("click", async () => {
       if (!uploadId || segments.length === 0) return;
