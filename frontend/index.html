@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Video Editor Local</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, sans-serif;
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 16px;
+    background: #0f1115;
+    color: #e8e8e8;
+  }
+  h1 { font-size: 1.4rem; }
+  p.sub { color: #9aa0a6; margin-top: -8px; }
+  .card {
+    background: #171a21;
+    border: 1px solid #2a2e37;
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 20px;
+  }
+  label { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+  input[type="file"] { margin-top: 8px; }
+  button {
+    background: #4f8cff;
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    margin-top: 12px;
+  }
+  button:disabled { background: #3a3f4b; cursor: not-allowed; }
+  #status { margin-top: 16px; font-size: 0.95rem; color: #9aa0a6; }
+  .downloads { margin-top: 16px; display: flex; gap: 12px; }
+  .downloads a {
+    color: #4f8cff;
+    text-decoration: none;
+    border: 1px solid #4f8cff;
+    padding: 8px 14px;
+    border-radius: 8px;
+  }
+  video { width: 100%; margin-top: 16px; border-radius: 8px; }
+</style>
+</head>
+<body>
+  <h1>Video Editor Local</h1>
+  <p class="sub">Corte de silêncio + legendas automáticas, tudo rodando na sua máquina.</p>
+
+  <div class="card">
+    <input type="file" id="fileInput" accept="video/*" />
+
+    <label><input type="checkbox" id="cutSilence" checked /> Cortar silêncios/pausas</label>
+    <label><input type="checkbox" id="removeFillers" /> Remover palavras repetidas e vícios de fala (né, tipo, uhm...)</label>
+    <label><input type="checkbox" id="stabilize" /> Estabilizar imagem tremida</label>
+    <label><input type="checkbox" id="enhance" checked /> Corrigir cor e normalizar áudio</label>
+    <label><input type="checkbox" id="reframe" /> Reframe vertical automático (9:16, segue o rosto)</label>
+    <label><input type="checkbox" id="removeBg" /> Remover fundo</label>
+    <label id="bgColorLabel" style="display: none; margin-left: 24px;">
+      Fundo sólido (deixe em branco para transparente):
+      <input type="text" id="bgColor" placeholder="ex: green, #00ff00" style="margin-left: 8px;" />
+    </label>
+    <label><input type="checkbox" id="upscale" /> Aumentar resolução (2x, nitidez)</label>
+    <label><input type="checkbox" id="subtitles" checked /> Gerar legendas automáticas</label>
+    <label><input type="checkbox" id="burnIn" checked /> Queimar legendas no vídeo</label>
+
+    <button id="submitBtn">Processar vídeo</button>
+
+    <div id="status"></div>
+    <div class="downloads" id="downloads" hidden>
+      <a id="downloadVideo" href="#">Baixar vídeo</a>
+      <a id="downloadSrt" href="#">Baixar legendas (.srt)</a>
+    </div>
+    <video id="preview" controls hidden></video>
+  </div>
+
+  <script>
+    const API_BASE = "http://localhost:8000";
+
+    const fileInput = document.getElementById("fileInput");
+    const submitBtn = document.getElementById("submitBtn");
+    const statusEl = document.getElementById("status");
+    const downloadsEl = document.getElementById("downloads");
+    const downloadVideoEl = document.getElementById("downloadVideo");
+    const downloadSrtEl = document.getElementById("downloadSrt");
+    const previewEl = document.getElementById("preview");
+    const removeBgEl = document.getElementById("removeBg");
+    const bgColorLabel = document.getElementById("bgColorLabel");
+
+    removeBgEl.addEventListener("change", () => {
+      bgColorLabel.style.display = removeBgEl.checked ? "block" : "none";
+    });
+
+    const STATUS_LABELS = {
+      queued: "Na fila...",
+      cutting_silence: "Cortando silêncios...",
+      removing_fillers: "Removendo palavras repetidas e vícios de fala...",
+      stabilizing: "Estabilizando imagem (duas passadas)...",
+      enhancing: "Corrigindo cor e áudio...",
+      reframing_vertical: "Enquadrando em formato vertical (seguindo o rosto)...",
+      removing_background: "Removendo fundo (pode demorar, processa frame a frame)...",
+      upscaling: "Aumentando resolução...",
+      transcribing: "Transcrevendo áudio (pode demorar um pouco)...",
+      generating_subtitles: "Gerando legendas...",
+      done: "Concluído!",
+      error: "Erro ao processar.",
+    };
+
+    async function pollJob(jobId) {
+      const res = await fetch(`${API_BASE}/api/jobs/${jobId}`);
+      const job = await res.json();
+      statusEl.textContent = STATUS_LABELS[job.status] ?? job.status;
+
+      if (job.status === "done") {
+        submitBtn.disabled = false;
+        downloadsEl.hidden = false;
+        downloadVideoEl.href = `${API_BASE}/api/jobs/${jobId}/video`;
+        if (job.result_srt) {
+          downloadSrtEl.hidden = false;
+          downloadSrtEl.href = `${API_BASE}/api/jobs/${jobId}/subtitles`;
+        } else {
+          downloadSrtEl.hidden = true;
+        }
+        previewEl.src = `${API_BASE}/api/jobs/${jobId}/video`;
+        previewEl.hidden = false;
+        return;
+      }
+
+      if (job.status === "error") {
+        submitBtn.disabled = false;
+        statusEl.textContent = `Erro: ${job.error}`;
+        return;
+      }
+
+      setTimeout(() => pollJob(jobId), 2000);
+    }
+
+    submitBtn.addEventListener("click", async () => {
+      const file = fileInput.files[0];
+      if (!file) {
+        statusEl.textContent = "Selecione um vídeo primeiro.";
+        return;
+      }
+
+      submitBtn.disabled = true;
+      downloadsEl.hidden = true;
+      previewEl.hidden = true;
+      statusEl.textContent = "Enviando vídeo...";
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("cut_silence_enabled", document.getElementById("cutSilence").checked);
+      formData.append("remove_fillers_enabled", document.getElementById("removeFillers").checked);
+      formData.append("stabilize_enabled", document.getElementById("stabilize").checked);
+      formData.append("enhance_enabled", document.getElementById("enhance").checked);
+      formData.append("reframe_enabled", document.getElementById("reframe").checked);
+      formData.append("remove_bg_enabled", document.getElementById("removeBg").checked);
+      formData.append("background_color", document.getElementById("bgColor").value);
+      formData.append("upscale_enabled", document.getElementById("upscale").checked);
+      formData.append("subtitles_enabled", document.getElementById("subtitles").checked);
+      formData.append("burn_in", document.getElementById("burnIn").checked);
+
+      const res = await fetch(`${API_BASE}/api/jobs`, { method: "POST", body: formData });
+      if (!res.ok) {
+        statusEl.textContent = "Falha ao enviar o vídeo.";
+        submitBtn.disabled = false;
+        return;
+      }
+
+      const job = await res.json();
+      pollJob(job.id);
+    });
+  </script>
+</body>
+</html>
