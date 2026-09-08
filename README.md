@@ -28,6 +28,14 @@ Nenhum dado sai da sua máquina — tudo roda localmente.
 
 ## Rodando localmente
 
+### Windows (mais fácil)
+
+1. Instale [Python](https://www.python.org/downloads/) (marque "Add Python to PATH" no instalador) e o [ffmpeg](https://www.gyan.dev/ffmpeg/builds/) (descompacte e adicione a pasta `bin` ao PATH do Windows).
+2. Dê **duplo clique** em `setup_e_rodar.bat` — ele cria o ambiente, instala tudo e sobe o servidor. Deixe a janela aberta.
+3. Dê duplo clique em `abrir_editor.bat` (ou abra `frontend/index.html` manualmente) para abrir a interface no navegador.
+
+### Mac/Linux (ou manual no Windows)
+
 ```bash
 cd backend
 python -m venv .venv
