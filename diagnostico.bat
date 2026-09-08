@@ -20,7 +20,7 @@ ffmpeg -version >> "%DIAG_DIR%\diagnostico.txt" 2>&1
 echo. >> "%DIAG_DIR%\diagnostico.txt"
 
 echo === ffmpeg tem vidstab? === >> "%DIAG_DIR%\diagnostico.txt"
-ffmpeg -filters 2>>"%DIAG_DIR%\diagnostico.txt" | findstr /I "vidstab" >> "%DIAG_DIR%\diagnostico.txt"
+ffmpeg -filters 2>&1 | findstr /I "vidstab" >> "%DIAG_DIR%\diagnostico.txt"
 if errorlevel 1 echo NAO ENCONTRADO >> "%DIAG_DIR%\diagnostico.txt"
 echo. >> "%DIAG_DIR%\diagnostico.txt"
 
@@ -35,7 +35,7 @@ echo. >> "%DIAG_DIR%\diagnostico.txt"
 echo === ffmpeg dentro de tools\ (se existir) tem vidstab? === >> "%DIAG_DIR%\diagnostico.txt"
 for /d %%D in ("%~dp0tools\ffmpeg-*") do (
     echo Testando %%D\bin\ffmpeg.exe >> "%DIAG_DIR%\diagnostico.txt"
-    "%%D\bin\ffmpeg.exe" -filters 2>>"%DIAG_DIR%\diagnostico.txt" | findstr /I "vidstab" >> "%DIAG_DIR%\diagnostico.txt"
+    "%%D\bin\ffmpeg.exe" -filters 2>&1 | findstr /I "vidstab" >> "%DIAG_DIR%\diagnostico.txt"
 )
 echo. >> "%DIAG_DIR%\diagnostico.txt"
 
