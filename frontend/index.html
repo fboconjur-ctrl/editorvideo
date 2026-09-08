@@ -45,8 +45,8 @@
     padding: 8px 14px;
     border-radius: 8px;
   }
-  .video-wrap { position: relative; margin-top: 16px; display: none; }
-  .video-wrap video { width: 100%; border-radius: 8px; display: block; background: #000; }
+  .video-wrap { position: relative; margin-top: 16px; display: none; max-width: 420px; margin-left: auto; margin-right: auto; }
+  .video-wrap video { width: 100%; max-height: 65vh; border-radius: 8px; display: block; background: #000; }
   #subtitleOverlay {
     position: absolute;
     left: 4%;
@@ -60,7 +60,7 @@
     display: none;
   }
   #resultWrap { margin-top: 18px; }
-  #resultWrap video { width: 100%; border-radius: 8px; margin-top: 8px; }
+  #resultWrap video { width: 100%; max-width: 420px; max-height: 65vh; display: block; border-radius: 8px; margin-top: 8px; }
   #steps { list-style: none; padding: 0; margin: 16px 0 0; }
   #steps li {
     padding: 6px 0;
@@ -181,7 +181,8 @@
 
       const nativeFontSize = Number(fontSizeEl.value) || Math.round(previewEl.videoHeight / 22);
       const scale = previewEl.clientHeight / previewEl.videoHeight;
-      subtitleOverlay.style.fontSize = `${Math.max(8, nativeFontSize * scale)}px`;
+      const maxPx = previewEl.clientHeight * 0.2;
+      subtitleOverlay.style.fontSize = `${Math.min(Math.max(8, nativeFontSize * scale), maxPx)}px`;
 
       const position = positionEl.value;
       subtitleOverlay.style.top = position === "top" ? "6%" : position === "middle" ? "45%" : "auto";

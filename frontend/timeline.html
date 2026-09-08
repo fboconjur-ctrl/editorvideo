@@ -25,8 +25,8 @@
     padding: 20px;
     margin-top: 16px;
   }
-  .video-wrap { position: relative; user-select: none; }
-  video { width: 100%; border-radius: 8px; background: #000; display: block; }
+  .video-wrap { position: relative; user-select: none; max-width: 420px; margin: 0 auto; }
+  video { width: 100%; max-height: 65vh; border-radius: 8px; background: #000; display: block; }
   #textPreviewLayer { position: absolute; inset: 0; }
   .text-overlay-preview {
     position: absolute;
@@ -104,7 +104,7 @@
 
   #status { margin-top: 14px; color: #9aa0a6; font-size: 0.9rem; }
   #resultBlock { margin-top: 16px; display: none; }
-  #resultBlock video { margin-top: 8px; }
+  #resultBlock video { margin-top: 8px; max-width: 420px; max-height: 65vh; display: block; }
   .downloads a {
     color: #4f8cff;
     text-decoration: none;
@@ -424,14 +424,18 @@
 
     function renderTextPreview() {
       textPreviewLayer.innerHTML = "";
-      if (!previewEl.videoHeight) return;
+      if (!previewEl.videoHeight || !previewEl.clientHeight) return;
       const scale = previewEl.clientHeight / previewEl.videoHeight;
+      // Trava de segurança: nunca deixa o texto passar de 20% da altura do
+      // preview, mesmo que o tamanho configurado seja grande demais para o
+      // vídeo — evita telas de texto gigante cobrindo o vídeo inteiro.
+      const maxPx = previewEl.clientHeight * 0.2;
       texts.forEach((t, i) => {
         const box = document.createElement("div");
         box.className = "text-overlay-preview";
         box.style.left = `${t.x_percent}%`;
         box.style.top = `${t.y_percent}%`;
-        box.style.fontSize = `${Math.max(8, t.font_size * scale)}px`;
+        box.style.fontSize = `${Math.min(Math.max(8, t.font_size * scale), maxPx)}px`;
         box.style.color = t.color;
         box.textContent = t.text;
         box.addEventListener("mousedown", (e) => startTextDrag(e, i));
