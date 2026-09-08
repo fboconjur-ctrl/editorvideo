@@ -7,9 +7,8 @@ echo   Gerando pacote de diagnostico...
 echo ============================================
 echo.
 
-set "DIAG_DIR=%TEMP%\editorvideo_diagnostico"
-if exist "%DIAG_DIR%" rmdir /s /q "%DIAG_DIR%"
-mkdir "%DIAG_DIR%"
+set "DIAG_DIR=%TEMP%\editorvideo_diagnostico_%RANDOM%"
+mkdir "%DIAG_DIR%" 2>nul
 
 echo === Python ===> "%DIAG_DIR%\diagnostico.txt"
 python --version >> "%DIAG_DIR%\diagnostico.txt" 2>&1
@@ -52,8 +51,21 @@ echo === Ultima versao do codigo (git log) === >> "%DIAG_DIR%\diagnostico.txt"
 git -C "%~dp0" log -3 --oneline >> "%DIAG_DIR%\diagnostico.txt" 2>&1
 echo. >> "%DIAG_DIR%\diagnostico.txt"
 
-set "ZIP_PATH=%USERPROFILE%\Downloads\diagnostico_editor.zip"
-powershell -NoProfile -Command "Compress-Archive -Path '%DIAG_DIR%\*' -DestinationPath '%ZIP_PATH%' -Force"
+set "ZIP_PATH=%USERPROFILE%\Downloads\diagnostico_editor_%RANDOM%.zip"
+powershell -NoProfile -Command "try { Compress-Archive -Path '%DIAG_DIR%\*' -DestinationPath '%ZIP_PATH%' -Force -ErrorAction Stop } catch { Write-Host $_.Exception.Message; exit 1 }"
+
+if errorlevel 1 (
+    echo.
+    echo [AVISO] Nao foi possivel criar o .zip ^(pode ser antivirus bloqueando,
+    echo ou a pasta Downloads sincronizada com OneDrive^). Mas o texto do
+    echo diagnostico esta aqui, sem precisar do zip:
+    echo.
+    echo %DIAG_DIR%\diagnostico.txt
+    echo.
+    echo Abra esse arquivo .txt direto, copie o conteudo e cole na conversa.
+    pause
+    exit /b 0
+)
 
 echo.
 echo ============================================
