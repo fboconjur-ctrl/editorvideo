@@ -113,7 +113,14 @@
     };
 
     async function pollJob(jobId) {
-      const res = await fetch(`${API_BASE}/api/jobs/${jobId}`);
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api/jobs/${jobId}`);
+      } catch (err) {
+        statusEl.textContent = "Conexão com o servidor perdida. Verifique se ele ainda está rodando.";
+        submitBtn.disabled = false;
+        return;
+      }
       const job = await res.json();
       statusEl.textContent = STATUS_LABELS[job.status] ?? job.status;
 
@@ -166,15 +173,22 @@
       formData.append("subtitles_enabled", document.getElementById("subtitles").checked);
       formData.append("burn_in", document.getElementById("burnIn").checked);
 
-      const res = await fetch(`${API_BASE}/api/jobs`, { method: "POST", body: formData });
-      if (!res.ok) {
-        statusEl.textContent = "Falha ao enviar o vídeo.";
-        submitBtn.disabled = false;
-        return;
-      }
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs`, { method: "POST", body: formData });
+        if (!res.ok) {
+          statusEl.textContent = `Falha ao enviar o vídeo (HTTP ${res.status}).`;
+          submitBtn.disabled = false;
+          return;
+        }
 
-      const job = await res.json();
-      pollJob(job.id);
+        const job = await res.json();
+        pollJob(job.id);
+      } catch (err) {
+        statusEl.textContent =
+          "Não foi possível conectar ao servidor em " + API_BASE +
+          ". Verifique se a janela do setup_e_rodar.bat ainda está aberta e rodando.";
+        submitBtn.disabled = false;
+      }
     });
   </script>
 </body>

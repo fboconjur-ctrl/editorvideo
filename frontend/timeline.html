@@ -154,9 +154,17 @@
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch(`${API_BASE}/api/uploads`, { method: "POST", body: formData });
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api/uploads`, { method: "POST", body: formData });
+      } catch (err) {
+        statusEl.textContent =
+          "Não foi possível conectar ao servidor em " + API_BASE +
+          ". Verifique se a janela do setup_e_rodar.bat ainda está aberta e rodando.";
+        return;
+      }
       if (!res.ok) {
-        statusEl.textContent = "Falha ao enviar o vídeo.";
+        statusEl.textContent = `Falha ao enviar o vídeo (HTTP ${res.status}).`;
         return;
       }
 
@@ -236,17 +244,23 @@
 
       statusEl.textContent = "Enviando lista de cortes para renderização...";
 
-      const res = await fetch(`${API_BASE}/api/render`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          upload_id: uploadId,
-          segments: segments.map((s) => ({ start: s.start, end: s.end })),
-        }),
-      });
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api/render`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            upload_id: uploadId,
+            segments: segments.map((s) => ({ start: s.start, end: s.end })),
+          }),
+        });
+      } catch (err) {
+        statusEl.textContent = "Não foi possível conectar ao servidor. Verifique se ele ainda está rodando.";
+        return;
+      }
 
       if (!res.ok) {
-        statusEl.textContent = "Falha ao iniciar a exportação.";
+        statusEl.textContent = `Falha ao iniciar a exportação (HTTP ${res.status}).`;
         return;
       }
 
@@ -255,7 +269,13 @@
     });
 
     async function pollRender(jobId) {
-      const res = await fetch(`${API_BASE}/api/render/${jobId}`);
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api/render/${jobId}`);
+      } catch (err) {
+        statusEl.textContent = "Conexão com o servidor perdida. Verifique se ele ainda está rodando.";
+        return;
+      }
       const job = await res.json();
 
       if (job.status === "rendering" || job.status === "queued") {
