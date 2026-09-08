@@ -8,13 +8,14 @@
   :root { color-scheme: light dark; }
   body {
     font-family: system-ui, sans-serif;
-    max-width: 900px;
+    max-width: 960px;
     margin: 30px auto;
     padding: 0 16px;
     background: #0f1115;
     color: #e8e8e8;
   }
   h1 { font-size: 1.4rem; margin-bottom: 2px; }
+  h2 { font-size: 1.05rem; margin: 0 0 8px; }
   p.sub { color: #9aa0a6; margin-top: 0; }
   a.nav-link { color: #4f8cff; text-decoration: none; font-size: 0.9rem; }
   .card {
@@ -24,8 +25,18 @@
     padding: 20px;
     margin-top: 16px;
   }
-  video { width: 100%; border-radius: 8px; background: #000; }
-  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+  .video-wrap { position: relative; }
+  video { width: 100%; border-radius: 8px; background: #000; display: block; }
+  #textPreviewLayer { position: absolute; inset: 0; pointer-events: none; }
+  .text-overlay-preview {
+    position: absolute;
+    pointer-events: none;
+    text-shadow: 0 0 3px #000, 0 0 6px #000;
+    font-weight: 600;
+    white-space: nowrap;
+    transform: translate(-50%, -50%);
+  }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; align-items: center; }
   button {
     background: #4f8cff;
     color: white;
@@ -74,11 +85,22 @@
     margin-top: 8px;
   }
   .hint { color: #9aa0a6; font-size: 0.82rem; margin-top: 6px; }
+  .props-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 10px; }
+  .props-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: #c7cbd1; }
+  .props-grid input, .props-grid select { padding: 6px; border-radius: 6px; border: 1px solid #2a2e37; background: #0f1115; color: #e8e8e8; }
+  .text-form { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .text-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: #c7cbd1; }
+  .text-form input, .text-form select { padding: 6px; border-radius: 6px; border: 1px solid #2a2e37; background: #0f1115; color: #e8e8e8; }
+  .text-list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .text-item {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #0f1115; border: 1px solid #2a2e37; border-radius: 8px; padding: 8px 12px; font-size: 0.85rem;
+  }
 </style>
 </head>
 <body>
   <h1>Editor manual (timeline)</h1>
-  <p class="sub">Corte, exclua e reordene trechos do vídeo na mão.</p>
+  <p class="sub">Corte, ajuste velocidade/volume/cor por trecho, adicione textos — estilo CapCut.</p>
   <a class="nav-link" href="index.html">&larr; Voltar para edição automática</a>
 
   <div class="card">
@@ -86,7 +108,10 @@
     <div id="status">Selecione um vídeo para começar.</div>
 
     <div id="editorArea" style="display:none;">
-      <video id="preview" controls></video>
+      <div class="video-wrap">
+        <video id="preview" controls></video>
+        <div id="textPreviewLayer"></div>
+      </div>
 
       <div class="toolbar">
         <button id="splitBtn">✂ Dividir no ponto atual</button>
@@ -98,6 +123,59 @@
       <p class="hint">Clique num bloco da timeline pra selecionar. "Dividir" corta o bloco selecionado no tempo atual do player.</p>
 
       <div id="timeline"></div>
+
+      <div id="segmentProps" style="display:none;">
+        <h2 style="margin-top:16px;">Ajustes do trecho selecionado</h2>
+        <div class="props-grid">
+          <label>Velocidade (0.5x–2x)
+            <input type="range" id="segSpeed" min="0.5" max="2" step="0.05" value="1" />
+            <span id="segSpeedValue">1.0x</span>
+          </label>
+          <label>Volume (0–2)
+            <input type="range" id="segVolume" min="0" max="2" step="0.05" value="1" />
+            <span id="segVolumeValue">1.0</span>
+          </label>
+          <label>Filtro de cor
+            <select id="segColorFilter">
+              <option value="none">Nenhum</option>
+              <option value="vibrant">Vibrante</option>
+              <option value="bw">Preto e branco</option>
+              <option value="warm">Quente</option>
+              <option value="cool">Frio</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <h2 style="margin-top:24px;">Textos na tela</h2>
+      <p class="hint">Tempos são relativos ao vídeo final editado (o que você vê em "Reproduzir edição"), não ao vídeo original.</p>
+      <div class="text-form">
+        <label>Texto
+          <input type="text" id="textContent" placeholder="Digite o texto" />
+        </label>
+        <label>Início (s)
+          <input type="number" id="textStart" min="0" step="0.1" value="0" />
+        </label>
+        <label>Fim (s)
+          <input type="number" id="textEnd" min="0" step="0.1" value="2" />
+        </label>
+        <label>Posição X (%)
+          <input type="range" id="textX" min="0" max="100" value="50" />
+        </label>
+        <label>Posição Y (%)
+          <input type="range" id="textY" min="0" max="100" value="85" />
+        </label>
+        <label>Tamanho
+          <input type="number" id="textSize" min="10" max="150" value="36" />
+        </label>
+        <label>Cor
+          <input type="text" id="textColor" value="white" />
+        </label>
+      </div>
+      <div class="toolbar">
+        <button id="addTextBtn" class="secondary">+ Adicionar texto</button>
+      </div>
+      <div class="text-list" id="textList"></div>
 
       <div class="toolbar">
         <button id="exportBtn">Exportar vídeo</button>
@@ -122,12 +200,25 @@
     const resultBlock = document.getElementById("resultBlock");
     const downloadResultEl = document.getElementById("downloadResult");
     const resultPreviewEl = document.getElementById("resultPreview");
+    const segmentProps = document.getElementById("segmentProps");
+    const segSpeedEl = document.getElementById("segSpeed");
+    const segSpeedValueEl = document.getElementById("segSpeedValue");
+    const segVolumeEl = document.getElementById("segVolume");
+    const segVolumeValueEl = document.getElementById("segVolumeValue");
+    const segColorFilterEl = document.getElementById("segColorFilter");
+    const textList = document.getElementById("textList");
+    const textPreviewLayer = document.getElementById("textPreviewLayer");
 
     let uploadId = null;
     let totalDuration = 0;
-    let segments = []; // [{start, end}], na ordem de exibição final
+    let segments = []; // [{start, end, speed, volume, color_filter}]
+    let texts = []; // [{text, start, end, x_percent, y_percent, font_size, color}]
     let selectedIndex = null;
     let playingEditIndex = null;
+
+    function newSegment(start, end) {
+      return { start, end, speed: 1.0, volume: 1.0, color_filter: "none" };
+    }
 
     function renderTimeline() {
       timelineEl.innerHTML = "";
@@ -139,10 +230,96 @@
         block.addEventListener("click", () => {
           selectedIndex = i;
           renderTimeline();
+          showSegmentProps();
         });
         timelineEl.appendChild(block);
       });
+      showSegmentProps();
     }
+
+    function showSegmentProps() {
+      if (selectedIndex === null) {
+        segmentProps.style.display = "none";
+        return;
+      }
+      const seg = segments[selectedIndex];
+      segmentProps.style.display = "block";
+      segSpeedEl.value = seg.speed;
+      segSpeedValueEl.textContent = `${seg.speed.toFixed(2)}x`;
+      segVolumeEl.value = seg.volume;
+      segVolumeValueEl.textContent = seg.volume.toFixed(2);
+      segColorFilterEl.value = seg.color_filter;
+    }
+
+    segSpeedEl.addEventListener("input", () => {
+      if (selectedIndex === null) return;
+      segments[selectedIndex].speed = Number(segSpeedEl.value);
+      segSpeedValueEl.textContent = `${segments[selectedIndex].speed.toFixed(2)}x`;
+    });
+    segVolumeEl.addEventListener("input", () => {
+      if (selectedIndex === null) return;
+      segments[selectedIndex].volume = Number(segVolumeEl.value);
+      segVolumeValueEl.textContent = segments[selectedIndex].volume.toFixed(2);
+    });
+    segColorFilterEl.addEventListener("change", () => {
+      if (selectedIndex === null) return;
+      segments[selectedIndex].color_filter = segColorFilterEl.value;
+    });
+
+    function renderTextList() {
+      textList.innerHTML = "";
+      texts.forEach((t, i) => {
+        const item = document.createElement("div");
+        item.className = "text-item";
+        item.innerHTML = `<span>"${t.text}" — ${t.start.toFixed(1)}s a ${t.end.toFixed(1)}s</span>`;
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "danger";
+        removeBtn.textContent = "Remover";
+        removeBtn.addEventListener("click", () => {
+          texts.splice(i, 1);
+          renderTextList();
+          renderTextPreview();
+        });
+        item.appendChild(removeBtn);
+        textList.appendChild(item);
+      });
+    }
+
+    document.getElementById("addTextBtn").addEventListener("click", () => {
+      const text = document.getElementById("textContent").value.trim();
+      if (!text) return;
+      texts.push({
+        text,
+        start: Number(document.getElementById("textStart").value) || 0,
+        end: Number(document.getElementById("textEnd").value) || 2,
+        x_percent: Number(document.getElementById("textX").value),
+        y_percent: Number(document.getElementById("textY").value),
+        font_size: Number(document.getElementById("textSize").value) || 36,
+        color: document.getElementById("textColor").value || "white",
+      });
+      document.getElementById("textContent").value = "";
+      renderTextList();
+      renderTextPreview();
+    });
+
+    function renderTextPreview() {
+      textPreviewLayer.innerHTML = "";
+      if (!previewEl.videoHeight) return;
+      const scale = previewEl.clientHeight / previewEl.videoHeight;
+      texts.forEach((t) => {
+        const box = document.createElement("div");
+        box.className = "text-overlay-preview";
+        box.style.left = `${t.x_percent}%`;
+        box.style.top = `${t.y_percent}%`;
+        box.style.fontSize = `${Math.max(8, t.font_size * scale)}px`;
+        box.style.color = t.color;
+        box.textContent = t.text;
+        textPreviewLayer.appendChild(box);
+      });
+    }
+
+    previewEl.addEventListener("loadedmetadata", renderTextPreview);
+    window.addEventListener("resize", renderTextPreview);
 
     fileInput.addEventListener("change", async () => {
       const file = fileInput.files[0];
@@ -171,13 +348,16 @@
       const info = await res.json();
       uploadId = info.upload_id;
       totalDuration = info.duration;
-      segments = [{ start: 0, end: totalDuration }];
+      segments = [newSegment(0, totalDuration)];
+      texts = [];
       selectedIndex = 0;
 
       statusEl.textContent = `Vídeo carregado (${totalDuration.toFixed(1)}s).`;
       editorArea.style.display = "block";
       resultBlock.style.display = "none";
       renderTimeline();
+      renderTextList();
+      renderTextPreview();
     });
 
     document.getElementById("splitBtn").addEventListener("click", () => {
@@ -188,7 +368,7 @@
         statusEl.textContent = "Posicione o player dentro do bloco selecionado antes de dividir.";
         return;
       }
-      const newSeg = { start: t, end: seg.end };
+      const newSeg = { ...seg, start: t };
       seg.end = t;
       segments.splice(selectedIndex + 1, 0, newSeg);
       renderTimeline();
@@ -251,7 +431,15 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             upload_id: uploadId,
-            segments: segments.map((s) => ({ start: s.start, end: s.end })),
+            segments: segments.map((s) => ({
+              start: s.start, end: s.end,
+              speed: s.speed, volume: s.volume, color_filter: s.color_filter,
+            })),
+            texts: texts.map((t) => ({
+              text: t.text, start: t.start, end: t.end,
+              x_percent: t.x_percent, y_percent: t.y_percent,
+              font_size: t.font_size, color: t.color,
+            })),
           }),
         });
       } catch (err) {

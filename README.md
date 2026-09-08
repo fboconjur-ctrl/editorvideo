@@ -55,12 +55,24 @@ manual: sobe o vídeo, mostra os blocos na linha do tempo, e permite:
 - **Dividir** o bloco selecionado no ponto atual do player.
 - **Excluir** um trecho.
 - **Reordenar** blocos (mover pra esquerda/direita).
+- **Velocidade por trecho** (0.5x a 2x).
+- **Volume por trecho** (0 a 2x, inclui mutar).
+- **Filtro de cor por trecho** (nenhum, vibrante, preto e branco, quente, frio).
+- **Textos na tela** — adiciona caixas de texto com posição (X/Y em %),
+  tamanho, cor e período de exibição (relativo ao vídeo final já editado).
 - **Reproduzir a edição** (toca só os trechos mantidos, na ordem escolhida).
-- **Exportar** — renderiza a lista de cortes no servidor (ffmpeg
-  trim+concat) e disponibiliza o vídeo final para download.
+- **Exportar** — renderiza tudo no servidor via ffmpeg (trim+concat com
+  velocidade/volume/filtro por trecho, e `drawtext` para os textos) e
+  disponibiliza o vídeo final para download.
 
 Backend correspondente: `POST /api/uploads` (sobe o vídeo sem processar) e
-`POST /api/render` (renderiza a lista de cortes).
+`POST /api/render` (renderiza a lista de cortes, efeitos por trecho e textos).
+
+Observação: `drawtext` do ffmpeg depende de suporte a fontconfig no seu
+build do ffmpeg pra escolher uma fonte automaticamente. Builds comuns no
+Windows (gyan.dev) e Linux/Mac (via apt/brew) já vêm com isso; se der erro
+de fonte na exportação, avise que dá pra apontar um arquivo de fonte
+específico.
 
 ## Pipeline automático (v1)
 

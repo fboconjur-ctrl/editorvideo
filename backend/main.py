@@ -252,11 +252,25 @@ async def create_upload(file: UploadFile = File(...)) -> UploadInfo:
 class EdlSegment(BaseModel):
     start: float
     end: float
+    speed: float = 1.0
+    volume: float = 1.0
+    color_filter: str = "none"
+
+
+class TextOverlayRequest(BaseModel):
+    text: str
+    start: float
+    end: float
+    x_percent: float = 50.0
+    y_percent: float = 85.0
+    font_size: int = 36
+    color: str = "white"
 
 
 class RenderRequest(BaseModel):
     upload_id: str
     segments: list[EdlSegment]
+    texts: list[TextOverlayRequest] = []
 
 
 RenderStatus = Literal["queued", "rendering", "done", "error"]
@@ -272,7 +286,12 @@ class RenderJob(BaseModel):
 RENDER_JOBS: dict[str, RenderJob] = {}
 
 
-def _run_render(job_id: str, upload_id: str, segments: list[tuple[float, float]]) -> None:
+def _run_render(
+    job_id: str,
+    upload_id: str,
+    segments: list[dict],
+    texts: list[dict],
+) -> None:
     job = RENDER_JOBS[job_id]
     try:
         job.status = "rendering"
@@ -281,7 +300,7 @@ def _run_render(job_id: str, upload_id: str, segments: list[tuple[float, float]]
         job_dir.mkdir(exist_ok=True)
         output_path = job_dir / "resultado.mp4"
 
-        render_edl(input_path, segments, output_path)
+        render_edl(input_path, segments, texts, output_path)
 
         job.result_video = str(output_path)
         job.status = "done"
@@ -296,8 +315,22 @@ async def create_render(background_tasks: BackgroundTasks, request: RenderReques
     job = RenderJob(id=job_id)
     RENDER_JOBS[job_id] = job
 
-    segments = [(s.start, s.end) for s in request.segments]
-    background_tasks.add_task(_run_render, job_id, request.upload_id, segments)
+    segments = [
+        {
+            "start": s.start, "end": s.end,
+            "speed": s.speed, "volume": s.volume, "color_filter": s.color_filter,
+        }
+        for s in request.segments
+    ]
+    texts = [
+        {
+            "text": t.text, "start": t.start, "end": t.end,
+            "x_percent": t.x_percent, "y_percent": t.y_percent,
+            "font_size": t.font_size, "color": t.color,
+        }
+        for t in request.texts
+    ]
+    background_tasks.add_task(_run_render, job_id, request.upload_id, segments, texts)
     return job
 
 
