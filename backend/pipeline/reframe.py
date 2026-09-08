@@ -11,7 +11,27 @@ import subprocess
 from pathlib import Path
 
 import cv2
-import mediapipe as mp
+
+
+def _get_face_detection_module():
+    """Import "preguiçoso" do submódulo de detecção de rosto.
+
+    Feito sob demanda (em vez de no topo do arquivo) para que uma falha de
+    import do mediapipe quebre só o recurso de reframe, não o servidor
+    inteiro na inicialização. Em versões recentes do mediapipe o atalho
+    `mediapipe.solutions` nem sempre fica disponível via
+    `import mediapipe as mp; mp.solutions...`, então importamos o
+    submódulo diretamente.
+    """
+    try:
+        from mediapipe.python.solutions import face_detection as mp_face_detection
+        return mp_face_detection
+    except (ImportError, AttributeError) as exc:
+        raise RuntimeError(
+            "Não foi possível carregar o detector de rosto do mediapipe "
+            "(a versão instalada pode ter mudado a API). Tente "
+            "`pip install -U mediapipe` no ambiente virtual do backend."
+        ) from exc
 
 TARGET_ASPECT = 9 / 16
 
@@ -38,7 +58,8 @@ def _average_face_center_x(video_path: Path, sample_every_n_frames: int = 15) ->
     cap = cv2.VideoCapture(str(video_path))
     centers: list[float] = []
 
-    with mp.solutions.face_detection.FaceDetection(min_detection_confidence=0.5) as detector:
+    mp_face_detection = _get_face_detection_module()
+    with mp_face_detection.FaceDetection(min_detection_confidence=0.5) as detector:
         frame_index = 0
         while True:
             ok, frame = cap.read()

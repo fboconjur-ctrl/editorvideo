@@ -1,6 +1,7 @@
 backend/uploads/
 backend/outputs/
 backend/.venv/
+tools/
 __pycache__/
 *.pyc
 .DS_Store
