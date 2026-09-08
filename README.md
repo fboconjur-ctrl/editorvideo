@@ -47,7 +47,22 @@ uvicorn main:app --reload --port 8000
 Depois abra `frontend/index.html` no navegador (ou sirva com qualquer
 servidor estático) — a interface já aponta para `http://localhost:8000`.
 
-## Pipeline (v1)
+## Editor manual (timeline)
+
+Além da edição automática, `frontend/timeline.html` oferece uma timeline
+manual: sobe o vídeo, mostra os blocos na linha do tempo, e permite:
+
+- **Dividir** o bloco selecionado no ponto atual do player.
+- **Excluir** um trecho.
+- **Reordenar** blocos (mover pra esquerda/direita).
+- **Reproduzir a edição** (toca só os trechos mantidos, na ordem escolhida).
+- **Exportar** — renderiza a lista de cortes no servidor (ffmpeg
+  trim+concat) e disponibiliza o vídeo final para download.
+
+Backend correspondente: `POST /api/uploads` (sobe o vídeo sem processar) e
+`POST /api/render` (renderiza a lista de cortes).
+
+## Pipeline automático (v1)
 
 1. Upload do vídeo.
 2. Corte automático de silêncios/pausas (via `auto-editor`).

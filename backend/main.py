@@ -13,11 +13,13 @@ from pydantic import BaseModel
 
 from pipeline.background_removal import remove_background
 from pipeline.enhance import enhance
+from pipeline.ffprobe_utils import probe_duration
 from pipeline.filler_removal import remove_fillers
 from pipeline.reframe import reframe_vertical
 from pipeline.silence_cut import cut_silence
 from pipeline.stabilize import stabilize
 from pipeline.subtitles import burn_subtitles, write_srt
+from pipeline.timeline_render import render_edl
 from pipeline.transcribe import transcribe
 from pipeline.upscale import upscale
 
@@ -212,3 +214,90 @@ async def download_video(job_id: str) -> FileResponse:
 async def download_subtitles(job_id: str) -> FileResponse:
     job = JOBS[job_id]
     return FileResponse(job.result_srt, filename="legendas.srt")
+
+
+# --- Editor manual (timeline) ---------------------------------------------
+# Fluxo independente do pipeline automático acima: aqui o vídeo é só
+# armazenado (sem processamento), o usuário decide os cortes na interface,
+# e o backend renderiza a lista de cortes (EDL) quando pedido.
+
+
+class UploadInfo(BaseModel):
+    upload_id: str
+    duration: float
+
+
+@app.post("/api/uploads")
+async def create_upload(file: UploadFile = File(...)) -> UploadInfo:
+    upload_id = str(uuid.uuid4())
+    upload_dir = UPLOADS_DIR / upload_id
+    upload_dir.mkdir(parents=True)
+
+    input_path = upload_dir / "input.mp4"
+    with input_path.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    return UploadInfo(upload_id=upload_id, duration=probe_duration(input_path))
+
+
+class EdlSegment(BaseModel):
+    start: float
+    end: float
+
+
+class RenderRequest(BaseModel):
+    upload_id: str
+    segments: list[EdlSegment]
+
+
+RenderStatus = Literal["queued", "rendering", "done", "error"]
+
+
+class RenderJob(BaseModel):
+    id: str
+    status: RenderStatus = "queued"
+    error: str | None = None
+    result_video: str | None = None
+
+
+RENDER_JOBS: dict[str, RenderJob] = {}
+
+
+def _run_render(job_id: str, upload_id: str, segments: list[tuple[float, float]]) -> None:
+    job = RENDER_JOBS[job_id]
+    try:
+        job.status = "rendering"
+        input_path = UPLOADS_DIR / upload_id / "input.mp4"
+        job_dir = OUTPUTS_DIR / job_id
+        job_dir.mkdir(exist_ok=True)
+        output_path = job_dir / "resultado.mp4"
+
+        render_edl(input_path, segments, output_path)
+
+        job.result_video = str(output_path)
+        job.status = "done"
+    except Exception as exc:  # noqa: BLE001 - queremos capturar qualquer falha da renderização
+        job.status = "error"
+        job.error = str(exc)
+
+
+@app.post("/api/render")
+async def create_render(background_tasks: BackgroundTasks, request: RenderRequest) -> RenderJob:
+    job_id = str(uuid.uuid4())
+    job = RenderJob(id=job_id)
+    RENDER_JOBS[job_id] = job
+
+    segments = [(s.start, s.end) for s in request.segments]
+    background_tasks.add_task(_run_render, job_id, request.upload_id, segments)
+    return job
+
+
+@app.get("/api/render/{job_id}")
+async def get_render(job_id: str) -> RenderJob:
+    return RENDER_JOBS[job_id]
+
+
+@app.get("/api/render/{job_id}/video")
+async def download_render(job_id: str) -> FileResponse:
+    job = RENDER_JOBS[job_id]
+    return FileResponse(job.result_video, filename="resultado.mp4")

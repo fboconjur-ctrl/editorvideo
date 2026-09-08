@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Editor manual (timeline)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, sans-serif;
+    max-width: 900px;
+    margin: 30px auto;
+    padding: 0 16px;
+    background: #0f1115;
+    color: #e8e8e8;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 2px; }
+  p.sub { color: #9aa0a6; margin-top: 0; }
+  a.nav-link { color: #4f8cff; text-decoration: none; font-size: 0.9rem; }
+  .card {
+    background: #171a21;
+    border: 1px solid #2a2e37;
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 16px;
+  }
+  video { width: 100%; border-radius: 8px; background: #000; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+  button {
+    background: #4f8cff;
+    color: white;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  button.secondary { background: #2a2e37; }
+  button.danger { background: #d9534f; }
+  button:disabled { background: #3a3f4b; cursor: not-allowed; }
+  #timeline {
+    display: flex;
+    height: 64px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #2a2e37;
+    margin-top: 8px;
+  }
+  .segment {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    color: white;
+    border-right: 2px solid #0f1115;
+    cursor: pointer;
+    background: #2f6fed;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .segment.selected { background: #ff9f43; color: #1a1300; font-weight: bold; }
+  .segment:hover { filter: brightness(1.15); }
+  #status { margin-top: 14px; color: #9aa0a6; font-size: 0.9rem; }
+  #resultBlock { margin-top: 16px; display: none; }
+  #resultBlock video { margin-top: 8px; }
+  .downloads a {
+    color: #4f8cff;
+    text-decoration: none;
+    border: 1px solid #4f8cff;
+    padding: 8px 14px;
+    border-radius: 8px;
+    display: inline-block;
+    margin-top: 8px;
+  }
+  .hint { color: #9aa0a6; font-size: 0.82rem; margin-top: 6px; }
+</style>
+</head>
+<body>
+  <h1>Editor manual (timeline)</h1>
+  <p class="sub">Corte, exclua e reordene trechos do vídeo na mão.</p>
+  <a class="nav-link" href="index.html">&larr; Voltar para edição automática</a>
+
+  <div class="card">
+    <input type="file" id="fileInput" accept="video/*" />
+    <div id="status">Selecione um vídeo para começar.</div>
+
+    <div id="editorArea" style="display:none;">
+      <video id="preview" controls></video>
+
+      <div class="toolbar">
+        <button id="splitBtn">✂ Dividir no ponto atual</button>
+        <button id="deleteBtn" class="danger">🗑 Excluir selecionado</button>
+        <button id="moveLeftBtn" class="secondary">◀ Mover</button>
+        <button id="moveRightBtn" class="secondary">Mover ▶</button>
+        <button id="playEditBtn" class="secondary">▶ Reproduzir edição</button>
+      </div>
+      <p class="hint">Clique num bloco da timeline pra selecionar. "Dividir" corta o bloco selecionado no tempo atual do player.</p>
+
+      <div id="timeline"></div>
+
+      <div class="toolbar">
+        <button id="exportBtn">Exportar vídeo</button>
+      </div>
+
+      <div id="resultBlock">
+        <strong>Resultado:</strong>
+        <div class="downloads"><a id="downloadResult" href="#">Baixar vídeo editado</a></div>
+        <video id="resultPreview" controls></video>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = "http://localhost:8000";
+
+    const fileInput = document.getElementById("fileInput");
+    const statusEl = document.getElementById("status");
+    const editorArea = document.getElementById("editorArea");
+    const previewEl = document.getElementById("preview");
+    const timelineEl = document.getElementById("timeline");
+    const resultBlock = document.getElementById("resultBlock");
+    const downloadResultEl = document.getElementById("downloadResult");
+    const resultPreviewEl = document.getElementById("resultPreview");
+
+    let uploadId = null;
+    let totalDuration = 0;
+    let segments = []; // [{start, end}], na ordem de exibição final
+    let selectedIndex = null;
+    let playingEditIndex = null;
+
+    function renderTimeline() {
+      timelineEl.innerHTML = "";
+      segments.forEach((seg, i) => {
+        const block = document.createElement("div");
+        block.className = "segment" + (i === selectedIndex ? " selected" : "");
+        block.style.flex = `${Math.max(seg.end - seg.start, 0.01)} 0 0`;
+        block.textContent = `${seg.start.toFixed(1)}s–${seg.end.toFixed(1)}s`;
+        block.addEventListener("click", () => {
+          selectedIndex = i;
+          renderTimeline();
+        });
+        timelineEl.appendChild(block);
+      });
+    }
+
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      statusEl.textContent = "Enviando vídeo...";
+      previewEl.src = URL.createObjectURL(file);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch(`${API_BASE}/api/uploads`, { method: "POST", body: formData });
+      if (!res.ok) {
+        statusEl.textContent = "Falha ao enviar o vídeo.";
+        return;
+      }
+
+      const info = await res.json();
+      uploadId = info.upload_id;
+      totalDuration = info.duration;
+      segments = [{ start: 0, end: totalDuration }];
+      selectedIndex = 0;
+
+      statusEl.textContent = `Vídeo carregado (${totalDuration.toFixed(1)}s).`;
+      editorArea.style.display = "block";
+      resultBlock.style.display = "none";
+      renderTimeline();
+    });
+
+    document.getElementById("splitBtn").addEventListener("click", () => {
+      if (selectedIndex === null) return;
+      const seg = segments[selectedIndex];
+      const t = previewEl.currentTime;
+      if (t <= seg.start + 0.05 || t >= seg.end - 0.05) {
+        statusEl.textContent = "Posicione o player dentro do bloco selecionado antes de dividir.";
+        return;
+      }
+      const newSeg = { start: t, end: seg.end };
+      seg.end = t;
+      segments.splice(selectedIndex + 1, 0, newSeg);
+      renderTimeline();
+    });
+
+    document.getElementById("deleteBtn").addEventListener("click", () => {
+      if (selectedIndex === null || segments.length <= 1) {
+        statusEl.textContent = "Não é possível excluir o único trecho restante.";
+        return;
+      }
+      segments.splice(selectedIndex, 1);
+      selectedIndex = Math.max(0, selectedIndex - 1);
+      renderTimeline();
+    });
+
+    document.getElementById("moveLeftBtn").addEventListener("click", () => {
+      if (selectedIndex === null || selectedIndex === 0) return;
+      [segments[selectedIndex - 1], segments[selectedIndex]] = [segments[selectedIndex], segments[selectedIndex - 1]];
+      selectedIndex -= 1;
+      renderTimeline();
+    });
+
+    document.getElementById("moveRightBtn").addEventListener("click", () => {
+      if (selectedIndex === null || selectedIndex === segments.length - 1) return;
+      [segments[selectedIndex + 1], segments[selectedIndex]] = [segments[selectedIndex], segments[selectedIndex + 1]];
+      selectedIndex += 1;
+      renderTimeline();
+    });
+
+    document.getElementById("playEditBtn").addEventListener("click", () => {
+      if (segments.length === 0) return;
+      playingEditIndex = 0;
+      previewEl.currentTime = segments[0].start;
+      previewEl.play();
+    });
+
+    previewEl.addEventListener("timeupdate", () => {
+      if (playingEditIndex === null) return;
+      const seg = segments[playingEditIndex];
+      if (previewEl.currentTime >= seg.end - 0.02) {
+        playingEditIndex += 1;
+        if (playingEditIndex >= segments.length) {
+          previewEl.pause();
+          playingEditIndex = null;
+        } else {
+          previewEl.currentTime = segments[playingEditIndex].start;
+        }
+      }
+    });
+
+    document.getElementById("exportBtn").addEventListener("click", async () => {
+      if (!uploadId || segments.length === 0) return;
+
+      statusEl.textContent = "Enviando lista de cortes para renderização...";
+
+      const res = await fetch(`${API_BASE}/api/render`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          upload_id: uploadId,
+          segments: segments.map((s) => ({ start: s.start, end: s.end })),
+        }),
+      });
+
+      if (!res.ok) {
+        statusEl.textContent = "Falha ao iniciar a exportação.";
+        return;
+      }
+
+      const job = await res.json();
+      pollRender(job.id);
+    });
+
+    async function pollRender(jobId) {
+      const res = await fetch(`${API_BASE}/api/render/${jobId}`);
+      const job = await res.json();
+
+      if (job.status === "rendering" || job.status === "queued") {
+        statusEl.textContent = "Renderizando vídeo final...";
+        setTimeout(() => pollRender(jobId), 1500);
+        return;
+      }
+
+      if (job.status === "error") {
+        statusEl.textContent = `Erro ao exportar: ${job.error}`;
+        return;
+      }
+
+      statusEl.textContent = "Exportação concluída!";
+      resultBlock.style.display = "block";
+      downloadResultEl.href = `${API_BASE}/api/render/${jobId}/video`;
+      resultPreviewEl.src = `${API_BASE}/api/render/${jobId}/video`;
+    }
+  </script>
+</body>
+</html>
