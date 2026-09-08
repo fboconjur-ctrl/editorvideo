@@ -52,6 +52,13 @@ servidor estático) — a interface já aponta para `http://localhost:8000`.
 Além da edição automática, `frontend/timeline.html` oferece uma timeline
 manual: sobe o vídeo, mostra os blocos na linha do tempo, e permite:
 
+**Combinando automático + manual**: depois que um job do editor automático
+termina, aparece um botão "✂ Editar manualmente este resultado" — ele leva
+o vídeo já processado (cortado, com legenda, etc.) direto para o editor
+manual, sem precisar baixar e subir de novo. Por baixo, isso usa
+`POST /api/jobs/{id}/promote` para transformar o resultado do job em um
+novo "upload" editável.
+
 - **Dividir** o bloco selecionado no ponto atual do player.
 - **Excluir** um trecho.
 - **Reordenar** blocos (mover pra esquerda/direita).

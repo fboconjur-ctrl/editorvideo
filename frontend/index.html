@@ -35,6 +35,7 @@
     font-size: 1rem;
     margin-top: 12px;
   }
+  button.secondary { background: #2a2e37; }
   button:disabled { background: #3a3f4b; cursor: not-allowed; }
   .downloads { margin-top: 16px; display: flex; gap: 12px; }
   .downloads a {
@@ -123,6 +124,11 @@
     <div id="resultWrap" hidden>
       <strong>Resultado:</strong>
       <video id="resultPreview" controls></video>
+      <div>
+        <button id="editManuallyBtn" class="secondary" style="margin-top: 10px;">
+          ✂ Editar manualmente este resultado
+        </button>
+      </div>
     </div>
   </div>
 
@@ -146,6 +152,9 @@
     const burnInEl = document.getElementById("burnIn");
     const fontSizeEl = document.getElementById("subtitleFontSize");
     const positionEl = document.getElementById("subtitlePosition");
+    const editManuallyBtn = document.getElementById("editManuallyBtn");
+
+    let currentJobId = null;
 
     removeBgEl.addEventListener("change", () => {
       bgColorLabel.style.display = removeBgEl.checked ? "block" : "none";
@@ -259,6 +268,7 @@
         }
         resultPreviewEl.src = `${API_BASE}/api/jobs/${jobId}/video`;
         resultWrap.hidden = false;
+        currentJobId = jobId;
         return;
       }
 
@@ -321,6 +331,28 @@
           `<li class="error">Não foi possível conectar ao servidor em ${API_BASE}. Verifique se a janela do setup_e_rodar.bat ainda está aberta e rodando.</li>`
         );
         submitBtn.disabled = false;
+      }
+    });
+
+    editManuallyBtn.addEventListener("click", async () => {
+      if (!currentJobId) return;
+      editManuallyBtn.disabled = true;
+      editManuallyBtn.textContent = "Preparando...";
+
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs/${currentJobId}/promote`, { method: "POST" });
+        if (!res.ok) {
+          alert("Não foi possível abrir este resultado no editor manual.");
+          editManuallyBtn.disabled = false;
+          editManuallyBtn.textContent = "✂ Editar manualmente este resultado";
+          return;
+        }
+        const info = await res.json();
+        window.location.href = `timeline.html?upload_id=${info.upload_id}&duration=${info.duration}`;
+      } catch (err) {
+        alert("Não foi possível conectar ao servidor.");
+        editManuallyBtn.disabled = false;
+        editManuallyBtn.textContent = "✂ Editar manualmente este resultado";
       }
     });
   </script>

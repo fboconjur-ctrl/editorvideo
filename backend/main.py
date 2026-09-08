@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -245,6 +245,30 @@ async def create_upload(file: UploadFile = File(...)) -> UploadInfo:
     input_path = upload_dir / "input.mp4"
     with input_path.open("wb") as f:
         shutil.copyfileobj(file.file, f)
+
+    return UploadInfo(upload_id=upload_id, duration=probe_duration(input_path))
+
+
+@app.get("/api/uploads/{upload_id}/video")
+async def get_upload_video(upload_id: str) -> FileResponse:
+    return FileResponse(UPLOADS_DIR / upload_id / "input.mp4")
+
+
+@app.post("/api/jobs/{job_id}/promote")
+async def promote_job_to_upload(job_id: str) -> UploadInfo:
+    """Pega o resultado de um job do pipeline automático já concluído e
+    disponibiliza como um novo "upload", pronto para abrir no editor
+    manual (timeline) e continuar editando em cima dele."""
+    job = JOBS[job_id]
+    if job.status != "done" or not job.result_video:
+        raise HTTPException(status_code=400, detail="O job ainda não foi concluído.")
+
+    upload_id = str(uuid.uuid4())
+    upload_dir = UPLOADS_DIR / upload_id
+    upload_dir.mkdir(parents=True)
+
+    input_path = upload_dir / "input.mp4"
+    shutil.copy(job.result_video, input_path)
 
     return UploadInfo(upload_id=upload_id, duration=probe_duration(input_path))
 

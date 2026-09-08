@@ -480,7 +480,23 @@
     previewEl.addEventListener("loadedmetadata", renderTextPreview);
     window.addEventListener("resize", () => { renderTextPreview(); renderTimeline(); });
 
-    // --- Upload -------------------------------------------------------------
+    // --- Upload / inicialização do editor -------------------------------------
+
+    function initEditor(id, duration) {
+      uploadId = id;
+      totalDuration = duration;
+      segments = [newSegment(0, totalDuration)];
+      texts = [];
+      selectedIndex = 0;
+      playingEditIndex = null;
+
+      statusEl.textContent = `Vídeo carregado (${totalDuration.toFixed(1)}s).`;
+      editorArea.style.display = "block";
+      resultBlock.style.display = "none";
+      renderTimeline();
+      renderTextList();
+      renderTextPreview();
+    }
 
     fileInput.addEventListener("change", async () => {
       const file = fileInput.files[0];
@@ -507,20 +523,21 @@
       }
 
       const info = await res.json();
-      uploadId = info.upload_id;
-      totalDuration = info.duration;
-      segments = [newSegment(0, totalDuration)];
-      texts = [];
-      selectedIndex = 0;
-      playingEditIndex = null;
-
-      statusEl.textContent = `Vídeo carregado (${totalDuration.toFixed(1)}s).`;
-      editorArea.style.display = "block";
-      resultBlock.style.display = "none";
-      renderTimeline();
-      renderTextList();
-      renderTextPreview();
+      initEditor(info.upload_id, info.duration);
     });
+
+    // Chegou aqui vindo do editor automático (botão "Editar manualmente este
+    // resultado")? Carrega direto o vídeo processado, sem precisar re-upload.
+    (function initFromQueryParams() {
+      const params = new URLSearchParams(window.location.search);
+      const queryUploadId = params.get("upload_id");
+      const queryDuration = parseFloat(params.get("duration"));
+      if (!queryUploadId || Number.isNaN(queryDuration)) return;
+
+      statusEl.textContent = "Carregando resultado da edição automática...";
+      previewEl.src = `${API_BASE}/api/uploads/${queryUploadId}/video`;
+      initEditor(queryUploadId, queryDuration);
+    })();
 
     // --- Botões de edição -----------------------------------------------------
 
