@@ -1,7 +1,11 @@
 backend/uploads/
 backend/outputs/
 backend/.venv/
+backend/static/
 tools/
 __pycache__/
 *.pyc
 .DS_Store
+frontend-app/node_modules/
+frontend-app/dist/
+frontend-app/tsconfig.tsbuildinfo

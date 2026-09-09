@@ -18,6 +18,16 @@ if errorlevel 1 (
 )
 echo [OK] Python encontrado.
 
+REM --- Verifica Node.js (necessario para compilar a interface) ---
+where node >nul 2>nul
+if errorlevel 1 (
+    echo [ERRO] Node.js nao foi encontrado no PATH.
+    echo Instale em https://nodejs.org/ ^(versao LTS^) e abra um novo PowerShell depois.
+    pause
+    exit /b 1
+)
+echo [OK] Node.js encontrado.
+
 REM --- Verifica ffmpeg ---
 where ffmpeg >nul 2>nul
 if errorlevel 1 (
@@ -59,6 +69,27 @@ if errorlevel 1 (
 )
 echo.
 
+REM --- Compila a interface (React) para dentro de backend/static ---
+echo Instalando/compilando a interface ^(primeira vez pode demorar^)...
+pushd "%~dp0frontend-app"
+call npm install
+if errorlevel 1 (
+    echo [ERRO] Falha ao instalar dependencias da interface ^(npm install^).
+    popd
+    pause
+    exit /b 1
+)
+call npm run build
+if errorlevel 1 (
+    echo [ERRO] Falha ao compilar a interface ^(npm run build^).
+    popd
+    pause
+    exit /b 1
+)
+popd
+echo [OK] Interface compilada.
+echo.
+
 cd /d "%~dp0backend"
 
 REM --- Cria ambiente virtual se nao existir ---
@@ -89,9 +120,13 @@ echo.
 echo ============================================
 echo   Tudo pronto! Iniciando o servidor...
 echo   Deixe esta janela aberta enquanto usa o editor.
-echo   Abra o arquivo frontend\index.html no navegador.
+echo   Abrindo http://localhost:8000 no navegador...
 echo ============================================
 echo.
+
+REM Abre o navegador em segundo plano, com um pequeno atraso, para dar
+REM tempo do servidor subir antes da pagina carregar.
+start "" /min cmd /c "timeout /t 3 /nobreak >nul & start http://localhost:8000"
 
 uvicorn main:app --reload --port 8000
 

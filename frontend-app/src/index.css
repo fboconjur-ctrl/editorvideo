@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  ::selection {
+    background: theme("colors.accent.DEFAULT");
+    color: white;
+  }
+}
+
+@layer components {
+  .input-field {
+    @apply w-full rounded-lg border border-base-700 bg-base-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent;
+  }
+}

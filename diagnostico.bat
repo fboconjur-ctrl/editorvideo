@@ -14,6 +14,19 @@ echo === Python ===> "%DIAG_DIR%\diagnostico.txt"
 python --version >> "%DIAG_DIR%\diagnostico.txt" 2>&1
 echo. >> "%DIAG_DIR%\diagnostico.txt"
 
+echo === Node.js/npm === >> "%DIAG_DIR%\diagnostico.txt"
+node --version >> "%DIAG_DIR%\diagnostico.txt" 2>&1
+npm --version >> "%DIAG_DIR%\diagnostico.txt" 2>&1
+echo. >> "%DIAG_DIR%\diagnostico.txt"
+
+echo === Interface compilada (backend\static) === >> "%DIAG_DIR%\diagnostico.txt"
+if exist "%~dp0backend\static\index.html" (
+    echo OK: backend\static\index.html existe. >> "%DIAG_DIR%\diagnostico.txt"
+) else (
+    echo NAO ENCONTRADA: rode setup_e_rodar.bat para compilar a interface. >> "%DIAG_DIR%\diagnostico.txt"
+)
+echo. >> "%DIAG_DIR%\diagnostico.txt"
+
 echo === ffmpeg (PATH global) === >> "%DIAG_DIR%\diagnostico.txt"
 where ffmpeg >> "%DIAG_DIR%\diagnostico.txt" 2>&1
 ffmpeg -version >> "%DIAG_DIR%\diagnostico.txt" 2>&1

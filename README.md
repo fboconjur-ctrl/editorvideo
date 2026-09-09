@@ -14,15 +14,18 @@ do CapCut/Captions.app:
 1. **Backend** (Python/FastAPI): recebe o vídeo, roda um pipeline de
    processamento (ffmpeg + auto-editor + faster-whisper) e disponibiliza o
    resultado para download.
-2. **Frontend** (HTML/JS puro): interface simples para subir o vídeo,
-   escolher quais etapas aplicar, acompanhar o progresso e baixar o
-   resultado.
+2. **Frontend** (React + TypeScript + Tailwind, em `frontend-app/`):
+   interface única, compilada e servida pelo próprio backend — você abre
+   **uma única URL** (`http://localhost:8000`) e navega entre as abas
+   Automático / Manual / Ferramentas dentro do mesmo app, sem recarregar
+   página nem abrir arquivos `.html` na mão.
 
 Nenhum dado sai da sua máquina — tudo roda localmente.
 
 ## Requisitos
 
 - Python 3.10+
+- [Node.js](https://nodejs.org/) (LTS) — só para compilar a interface, não fica rodando depois
 - [ffmpeg](https://ffmpeg.org/) instalado e disponível no PATH
 - GPU é opcional (acelera a transcrição, mas funciona em CPU)
 
@@ -30,26 +33,39 @@ Nenhum dado sai da sua máquina — tudo roda localmente.
 
 ### Windows (mais fácil)
 
-1. Instale [Python](https://www.python.org/downloads/) (marque "Add Python to PATH" no instalador) e o [ffmpeg](https://www.gyan.dev/ffmpeg/builds/) (descompacte e adicione a pasta `bin` ao PATH do Windows).
-2. Dê **duplo clique** em `setup_e_rodar.bat` — ele cria o ambiente, instala tudo e sobe o servidor. Deixe a janela aberta.
-3. Dê duplo clique em `abrir_editor.bat` (ou abra `frontend/index.html` manualmente) para abrir a interface no navegador.
+1. Instale [Python](https://www.python.org/downloads/) (marque "Add Python to PATH"), [Node.js](https://nodejs.org/) (versão LTS) e o [ffmpeg](https://www.gyan.dev/ffmpeg/builds/) (descompacte e adicione a pasta `bin` ao PATH do Windows).
+2. Dê **duplo clique** em `setup_e_rodar.bat` — ele compila a interface, cria o ambiente Python, instala tudo, sobe o servidor e abre `http://localhost:8000` no navegador automaticamente. Deixe a janela aberta enquanto usa o editor.
 
 ### Mac/Linux (ou manual no Windows)
 
 ```bash
-cd backend
+# compila a interface (gera backend/static/)
+cd frontend-app
+npm install
+npm run build
+
+# sobe o backend, que já serve a interface compilada
+cd ../backend
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-Depois abra `frontend/index.html` no navegador (ou sirva com qualquer
-servidor estático) — a interface já aponta para `http://localhost:8000`.
+Abra `http://localhost:8000` no navegador.
+
+### Desenvolvendo a interface (hot-reload)
+
+Se for mexer no código do `frontend-app/`, rode `npm run dev` dentro dessa
+pasta em vez de `npm run build` — sobe um servidor Vite em
+`http://localhost:5173` com hot-reload, que já faz proxy de `/api/*` para
+o backend em `localhost:8000` (configurado em `vite.config.ts`). Rode o
+backend normalmente em paralelo. Quando terminar, rode `npm run build`
+para gerar a versão de produção servida pelo backend.
 
 ## Editor manual (timeline)
 
-Além da edição automática, `frontend/timeline.html` oferece uma timeline
+Além da edição automática, a aba "Manual" do app oferece uma timeline
 manual: sobe o vídeo, mostra os blocos na linha do tempo, e permite:
 
 **Combinando automático + manual**: depois que um job do editor automático
@@ -123,7 +139,7 @@ sem depender de GPU/modelo. Uma versão com IA real pode ser adicionada
 depois integrando Real-ESRGAN, mas isso exige baixar um modelo maior e
 idealmente rodar em GPU.
 
-## Ferramentas extras (`frontend/tools.html`)
+## Ferramentas extras (aba "Ferramentas" do app)
 
 - **Transcrever vídeo/áudio**: sobe um arquivo e recebe de volta o texto
   (`.txt`) e a legenda (`.srt`), sem mexer no vídeo. Útil pra tirar uma

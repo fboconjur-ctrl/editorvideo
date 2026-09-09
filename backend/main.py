@@ -9,6 +9,7 @@ from typing import Literal
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from pipeline.background_removal import remove_background
@@ -494,3 +495,13 @@ async def get_tts(job_id: str) -> TtsJob:
 async def download_tts(job_id: str) -> FileResponse:
     job = TTS_JOBS[job_id]
     return FileResponse(job.result_audio, filename="voz.wav")
+
+
+# --- Frontend ---------------------------------------------------------------
+# Serve o app React já compilado (frontend-app/ -> backend/static/), assim o
+# usuário abre uma única URL (http://localhost:8000) em vez de arquivos HTML
+# soltos. Precisa ser o ÚLTIMO registro de rota: qualquer caminho que não
+# bata com uma rota /api/* definida acima cai aqui.
+STATIC_DIR = BASE_DIR / "static"
+if STATIC_DIR.exists():
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
