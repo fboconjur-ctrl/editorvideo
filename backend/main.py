@@ -719,6 +719,7 @@ def _run_text_to_video(
     subtitles_enabled: bool,
     subtitle_font_size: int | None,
     subtitle_position: str,
+    subtitle_style: str,
     orientation: str,
     cover_image_path: Path | None,
     use_intro: bool,
@@ -740,6 +741,7 @@ def _run_text_to_video(
             subtitles_enabled=subtitles_enabled,
             subtitle_font_size=subtitle_font_size,
             subtitle_position=subtitle_position,
+            subtitle_style=subtitle_style,
             orientation=orientation,
             intro_video_path=get_bumper_path("intro") if use_intro else None,
             outro_video_path=get_bumper_path("outro") if use_outro else None,
@@ -775,6 +777,7 @@ async def create_text_to_video(
     subtitles_enabled: bool = Form(False),
     subtitle_font_size: int = Form(0),
     subtitle_position: str = Form("bottom"),
+    subtitle_style: str = Form("static"),
     orientation: str = Form("horizontal"),
     cover_image: UploadFile | None = File(None),
     use_intro: bool = Form(True),
@@ -826,8 +829,8 @@ async def create_text_to_video(
     TEXT_TO_VIDEO_JOBS[job_id] = job
     background_tasks.add_task(
         _run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None, manual_image_map,
-        subtitles_enabled, subtitle_font_size or None, subtitle_position, orientation, cover_image_path,
-        use_intro, use_outro, use_webcam, webcam_position,
+        subtitles_enabled, subtitle_font_size or None, subtitle_position, subtitle_style, orientation,
+        cover_image_path, use_intro, use_outro, use_webcam, webcam_position,
     )
     return job
 

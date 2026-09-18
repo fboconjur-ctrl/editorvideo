@@ -1,9 +1,10 @@
-"""Geração de arquivos .srt e queima (burn-in) de legendas no vídeo."""
+"""Geração de arquivos .srt/.ass e queima (burn-in) de legendas no vídeo."""
 import subprocess
 from pathlib import Path
 
 from .ffprobe_utils import probe_dimensions
 from .transcribe import Segment
+from .tts import WordTiming
 
 # Alinhamento no padrão ASS/libass: 2 = embaixo centralizado, 8 = em cima
 # centralizado, 5 = centro da tela.
@@ -138,6 +139,106 @@ def burn_subtitles(
         "-i", str(video_path),
         "-vf",
         f"subtitles='{srt_escaped}':force_style='{force_style}'",
+        "-c:a", "copy",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
+def _ass_timestamp(seconds: float) -> str:
+    # Arredonda tudo pra centésimos de segundo ANTES de quebrar em
+    # horas/minutos/segundos — evita casos de borda onde arredondar só a
+    # parte decimal estoura pro próximo minuto/hora sem propagar o carry
+    # (ex: 59.999s virando "0:00:60.00" em vez de "0:01:00.00").
+    total_centis = round(max(0.0, seconds) * 100)
+    hours, rem = divmod(total_centis, 360_000)
+    minutes, rem = divmod(rem, 6_000)
+    secs, centis = divmod(rem, 100)
+    return f"{hours:d}:{minutes:02d}:{secs:02d}.{centis:02d}"
+
+
+def _escape_ass_text(text: str) -> str:
+    # Chaves têm significado especial no ASS (abrem/fecham tags de estilo)
+    # — sem isso, uma palavra com "{" ou "}" (raro, mas possível em texto
+    # colado de outro lugar) quebraria a legenda inteira dali pra frente.
+    return text.replace("{", "(").replace("}", ")")
+
+
+def build_karaoke_ass(
+    chunk_word_timings: list[list[WordTiming]],
+    ass_path: Path,
+    resolution: tuple[int, int],
+    font_size: int | None = None,
+    position: str = "bottom",
+) -> None:
+    """Gera um arquivo .ass com efeito karaokê nativo do libass: cada
+    trecho narrado vira uma linha de legenda onde as palavras mudam de
+    cor conforme são faladas (destaque progressivo), igual ao estilo de
+    legenda animada do CapCut/Captions.app — sem precisar desenhar frame
+    a frame, o próprio libass anima a transição de cor no tempo certo.
+
+    `chunk_word_timings`: uma lista por trecho narrado, cada uma com o
+    tempo (já absoluto, em segundos, na linha do tempo do vídeo final) de
+    cada palavra daquele trecho. Normalmente vem do timing de palavra do
+    motor de voz Edge (`synthesize_speech_edge_with_words`) — o motor
+    local não fornece esse timing."""
+    width, height = resolution
+    if font_size is None:
+        font_size = max(16, round(min(width, height) / 18))
+
+    alignment = POSITION_TO_ALIGNMENT.get(position, 2)
+    margin_v = round(height * 0.06)
+
+    # Cores no formato ASS &HAABBGGRR (alfa, azul, verde, vermelho).
+    # Antes de ser falada: branco. Depois de falada: azul de destaque
+    # (mesmo tom de accent usado na interface, #5b7cff -> BGR ff7c5b).
+    secondary_unspoken = "&H00FFFFFF"
+    primary_spoken = "&H00FF7C5B"
+    outline_color = "&H00000000"
+    back_color = "&H00000000"
+
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: {width}\n"
+        f"PlayResY: {height}\n"
+        "ScaledBorderAndShadow: yes\n"
+        "\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: Karaoke,Arial,{font_size},{primary_spoken},{secondary_unspoken},{outline_color},{back_color},"
+        f"1,0,0,0,100,100,0,0,3,1,0,{alignment},10,10,{margin_v},1\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+
+    lines = [header]
+    for words in chunk_word_timings:
+        if not words:
+            continue
+        start = words[0].start
+        end = words[-1].end
+        karaoke_text = "".join(
+            f"{{\\k{max(1, round((w.end - w.start) * 100))}}}{_escape_ass_text(w.text)} " for w in words
+        ).rstrip()
+        lines.append(f"Dialogue: 0,{_ass_timestamp(start)},{_ass_timestamp(end)},Karaoke,,0,0,0,,{karaoke_text}\n")
+
+    ass_path.write_text("".join(lines), encoding="utf-8")
+
+
+def burn_karaoke_subtitles(video_path: Path, ass_path: Path, output_path: Path) -> None:
+    """Queima o arquivo .ass (com efeito karaokê já definido dentro dele)
+    no vídeo. Diferente de `burn_subtitles`, não usa `force_style` — o
+    estilo (cor, tamanho, posição, PlayResX/Y) já vem definido no próprio
+    arquivo .ass gerado por `build_karaoke_ass`."""
+    ass_escaped = str(ass_path).replace("\\", "/").replace(":", "\\:")
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(video_path),
+        "-vf", f"subtitles='{ass_escaped}'",
         "-c:a", "copy",
         str(output_path),
     ]

@@ -21,6 +21,13 @@ class VoiceInfo:
     languages: list[str]
 
 
+@dataclass
+class WordTiming:
+    text: str
+    start: float
+    end: float
+
+
 def list_local_voices() -> list[VoiceInfo]:
     engine = pyttsx3.init()
     voices = engine.getProperty("voices") or []
@@ -104,6 +111,35 @@ def synthesize_speech_edge(text: str, output_path: Path, voice_id: str | None = 
         await communicate.save(str(output_path))
 
     asyncio.run(_run())
+
+
+def synthesize_speech_edge_with_words(
+    text: str, output_path: Path, voice_id: str | None = None, rate: int | None = None
+) -> list[WordTiming]:
+    """Como `synthesize_speech_edge`, mas também devolve o tempo exato
+    (início/fim, em segundos, relativo ao início do áudio) de cada
+    palavra falada — usado pra gerar legenda animada estilo CapCut
+    (palavra ganha destaque conforme é falada). Só o motor Edge fornece
+    esse timing; o motor local (pyttsx3) não tem equivalente."""
+    async def _run() -> list[WordTiming]:
+        percent = rate or 0
+        rate_str = f"+{percent}%" if percent >= 0 else f"{percent}%"
+        communicate = edge_tts.Communicate(text, voice_id or "pt-BR-FranciscaNeural", rate=rate_str)
+        words: list[WordTiming] = []
+        # 100-ns ("ticks") é a unidade que o serviço da Microsoft usa pra
+        # offset/duration — precisa dividir por 10_000_000 pra virar segundos.
+        TICKS_PER_SECOND = 10_000_000
+        with output_path.open("wb") as f:
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio" and "data" in chunk:
+                    f.write(chunk["data"])
+                elif chunk["type"] == "WordBoundary":
+                    start = chunk["offset"] / TICKS_PER_SECOND
+                    duration = chunk["duration"] / TICKS_PER_SECOND
+                    words.append(WordTiming(text=chunk["text"], start=start, end=start + duration))
+        return words
+
+    return asyncio.run(_run())
 
 
 def synthesize_speech(

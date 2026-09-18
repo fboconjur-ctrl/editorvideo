@@ -169,7 +169,8 @@ export function createTextToVideo(
   useIntro?: boolean,
   useOutro?: boolean,
   useWebcam?: boolean,
-  webcamPosition?: WebcamPosition
+  webcamPosition?: WebcamPosition,
+  subtitleStyle?: "static" | "karaoke"
 ): Promise<TextToVideoJob> {
   const formData = new FormData();
   formData.append("text", text);
@@ -185,6 +186,7 @@ export function createTextToVideo(
   if (subtitlesEnabled) {
     formData.append("subtitles_enabled", "true");
   }
+  formData.append("subtitle_style", subtitleStyle ?? "static");
   formData.append("orientation", orientation ?? "horizontal");
   if (coverImage) {
     formData.append("cover_image", coverImage);

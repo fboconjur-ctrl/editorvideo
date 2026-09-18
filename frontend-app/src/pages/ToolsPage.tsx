@@ -370,6 +370,7 @@ function TextToVideoCard() {
   const [assignments, setAssignments] = useState<(number | null)[]>([]);
   const [loadingChunks, setLoadingChunks] = useState(false);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
+  const [subtitleStyle, setSubtitleStyle] = useState<"static" | "karaoke">("karaoke");
   const [orientation, setOrientation] = useState<"horizontal" | "vertical">("horizontal");
 
   const [bumperStatus, setBumperStatus] = useState<api.BumperStatus | null>(null);
@@ -523,7 +524,8 @@ function TextToVideoCard() {
         bumperStatus?.has_intro ? useIntro : false,
         bumperStatus?.has_outro ? useOutro : false,
         (bumperStatus?.webcam_clips.length ?? 0) > 0 ? useWebcam : false,
-        webcamPosition
+        webcamPosition,
+        subtitlesEnabled ? subtitleStyle : undefined
       );
       await poll(job.id);
     } catch (err) {
@@ -842,6 +844,39 @@ function TextToVideoCard() {
           label="Queimar legenda no vídeo"
           description="Usa o próprio texto da narração como legenda, sincronizada com o áudio de cada trecho"
         />
+        {subtitlesEnabled && (
+          <div className="mt-2 flex gap-2 pl-1">
+            <button
+              type="button"
+              className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition ${
+                subtitleStyle === "karaoke"
+                  ? "border-accent bg-accent/10 text-accent"
+                  : "border-base-700 text-slate-400 hover:border-base-600"
+              }`}
+              onClick={() => setSubtitleStyle("karaoke")}
+              disabled={selection.engine !== "edge"}
+              title={selection.engine !== "edge" ? "Precisa do motor de voz Neural (Edge)" : undefined}
+            >
+              Animada (estilo CapCut) — palavra por palavra
+            </button>
+            <button
+              type="button"
+              className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition ${
+                subtitleStyle === "static"
+                  ? "border-accent bg-accent/10 text-accent"
+                  : "border-base-700 text-slate-400 hover:border-base-600"
+              }`}
+              onClick={() => setSubtitleStyle("static")}
+            >
+              Estática (bloco de texto fixo)
+            </button>
+          </div>
+        )}
+        {subtitlesEnabled && subtitleStyle === "karaoke" && selection.engine !== "edge" && (
+          <p className="mt-1 pl-1 text-xs text-amber-400">
+            Legenda animada precisa do motor "Neural (Edge)" — com o motor local, sai estática mesmo assim.
+          </p>
+        )}
       </div>
 
       <Button className="mt-4" onClick={handleGenerate} disabled={!text.trim() || busy}>

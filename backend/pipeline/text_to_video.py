@@ -13,9 +13,9 @@ import yake
 from deep_translator import GoogleTranslator
 
 from .ffprobe_utils import has_audio_stream, probe_duration
-from .subtitles import burn_subtitles, write_srt
+from .subtitles import burn_karaoke_subtitles, burn_subtitles, build_karaoke_ass, write_srt
 from .transcribe import Segment
-from .tts import synthesize_speech
+from .tts import WordTiming, synthesize_speech, synthesize_speech_edge_with_words
 
 HORIZONTAL_RESOLUTION = (1920, 1080)
 VERTICAL_RESOLUTION = (1080, 1920)
@@ -542,6 +542,7 @@ def generate_video_from_text(
     subtitles_enabled: bool = False,
     subtitle_font_size: int | None = None,
     subtitle_position: str = "bottom",
+    subtitle_style: str = "static",
     orientation: str = "horizontal",
     intro_video_path: Path | None = None,
     outro_video_path: Path | None = None,
@@ -559,6 +560,12 @@ def generate_video_from_text(
     `subtitles_enabled`: queima o próprio texto da narração como legenda,
     sincronizado com a duração real de cada trecho narrado — não precisa
     transcrever de novo (já sabemos exatamente o texto de cada trecho).
+
+    `subtitle_style`: "static" (legenda fixa, padrão) ou "karaoke"
+    (palavra ganha destaque de cor conforme é falada, estilo
+    CapCut/Captions.app). O estilo karaokê só funciona com o motor de
+    voz Edge (só ele fornece o tempo exato de cada palavra) — com o
+    motor local, cai automaticamente pra "static".
 
     `orientation`: "horizontal" (1920x1080, YouTube/paisagem) ou
     "vertical" (1080x1920, Reels/Shorts/TikTok) — também usado pra pedir
@@ -580,10 +587,16 @@ def generate_video_from_text(
 
     resolution = VERTICAL_RESOLUTION if orientation == "vertical" else HORIZONTAL_RESOLUTION
 
+    # Karaokê exige o tempo exato de cada palavra, que só o motor Edge
+    # fornece — com o motor local, cai pro estilo estático automaticamente
+    # em vez de gerar uma legenda sem efeito nenhum (ou dar erro).
+    karaoke_active = subtitles_enabled and subtitle_style == "karaoke" and tts_engine == "edge"
+
     manual_image_map = manual_image_map or {}
     query_log_lines = []
     used_media_ids: set[str] = set()
     subtitle_segments: list[Segment] = []
+    karaoke_chunks: list[list[WordTiming]] = []
     elapsed = 0.0
 
     with tempfile.TemporaryDirectory() as tmp_str:
@@ -592,7 +605,13 @@ def generate_video_from_text(
 
         for i, chunk in enumerate(chunks):
             audio_path = tmp / f"audio_{i}.mp3"
-            synthesize_speech(chunk, audio_path, engine=tts_engine, voice_id=voice_id, rate=rate)
+            if karaoke_active:
+                words = synthesize_speech_edge_with_words(chunk, audio_path, voice_id=voice_id, rate=rate)
+                karaoke_chunks.append(
+                    [WordTiming(text=w.text, start=elapsed + w.start, end=elapsed + w.end) for w in words]
+                )
+            else:
+                synthesize_speech(chunk, audio_path, engine=tts_engine, voice_id=voice_id, rate=rate)
             duration = probe_duration(audio_path)
             subtitle_segments.append(Segment(start=elapsed, end=elapsed + duration, text=chunk))
             elapsed += duration
@@ -643,7 +662,16 @@ def generate_video_from_text(
         )
         content_current = content_concat
 
-        if subtitles_enabled:
+        if karaoke_active:
+            ass_path = tmp / "legendas.ass"
+            build_karaoke_ass(
+                karaoke_chunks, ass_path, resolution,
+                font_size=subtitle_font_size, position=subtitle_position,
+            )
+            content_with_subs = tmp / "content_with_subs.mp4"
+            burn_karaoke_subtitles(content_current, ass_path, content_with_subs)
+            content_current = content_with_subs
+        elif subtitles_enabled:
             srt_path = tmp / "legendas.srt"
             write_srt(subtitle_segments, srt_path)
             content_with_subs = tmp / "content_with_subs.mp4"
