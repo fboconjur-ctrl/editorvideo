@@ -90,10 +90,15 @@ export function renderVideoUrl(jobId: string): string {
   return `${API_BASE}/api/render/${jobId}/video`;
 }
 
-export function createTranscription(file: File | null, youtubeUrl?: string): Promise<TranscriptionJob> {
+export function createTranscription(
+  file: File | null,
+  youtubeUrl?: string,
+  diarize?: boolean
+): Promise<TranscriptionJob> {
   const formData = new FormData();
   if (file) formData.append("file", file);
   if (youtubeUrl) formData.append("youtube_url", youtubeUrl);
+  formData.append("diarize", String(!!diarize));
   return request<TranscriptionJob>("/api/transcriptions", { method: "POST", body: formData });
 }
 
@@ -134,11 +139,14 @@ export function getSettings(): Promise<SettingsInfo> {
   return request<SettingsInfo>("/api/settings");
 }
 
-export function saveSettings(pexelsApiKey: string): Promise<SettingsInfo> {
+export function saveSettings(settings: { pexelsApiKey?: string; huggingfaceToken?: string }): Promise<SettingsInfo> {
   return request<SettingsInfo>("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pexels_api_key: pexelsApiKey }),
+    body: JSON.stringify({
+      pexels_api_key: settings.pexelsApiKey,
+      huggingface_token: settings.huggingfaceToken,
+    }),
   });
 }
 

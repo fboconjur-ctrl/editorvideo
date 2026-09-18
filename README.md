@@ -177,6 +177,11 @@ idealmente rodar em GPU.
   Depois de gerar, um botão "Ver buscas de imagem usadas" mostra
   exatamente qual busca/fonte foi usada em cada trecho, pra facilitar
   ajustar se alguma imagem vier estranha.
+- **Separar por quem fala** (opcional, na transcrição): identifica cada
+  pessoa distinta na gravação (`[Pessoa 1]`, `[Pessoa 2]`...), usando
+  `pyannote.audio`. Precisa de um token gratuito do Hugging Face — a
+  interface pede e guarda localmente. É uma instalação mais pesada (usa
+  PyTorch por baixo) e a primeira execução baixa o modelo de diarização.
 
 ## Roadmap
 

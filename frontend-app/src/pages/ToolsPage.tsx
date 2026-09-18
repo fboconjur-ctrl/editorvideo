@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Download, Mic, Volume2, Link as LinkIcon, Upload, Clapperboard, KeyRound } from "lucide-react";
 import { Card, CardTitle, CardSubtitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
+import { Toggle } from "../components/ui/Toggle";
 import { Dropzone } from "../components/ui/Dropzone";
 import * as api from "../lib/api";
 import type { TtsEngine, VoiceOption } from "../lib/types";
@@ -24,6 +25,32 @@ function TranscriptionCard() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ jobId: string } | null>(null);
 
+  const [diarize, setDiarize] = useState(false);
+  const [hasHfToken, setHasHfToken] = useState<boolean | null>(null);
+  const [hfTokenInput, setHfTokenInput] = useState("");
+  const [savingToken, setSavingToken] = useState(false);
+
+  useEffect(() => {
+    api
+      .getSettings()
+      .then((s) => setHasHfToken(s.has_huggingface_token))
+      .catch(() => setHasHfToken(false));
+  }, []);
+
+  async function handleSaveToken() {
+    if (!hfTokenInput.trim()) return;
+    setSavingToken(true);
+    try {
+      const s = await api.saveSettings({ huggingfaceToken: hfTokenInput.trim() });
+      setHasHfToken(s.has_huggingface_token);
+      setHfTokenInput("");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingToken(false);
+    }
+  }
+
   const canSubmit = source === "upload" ? !!file : youtubeUrl.trim().length > 0;
 
   async function handleTranscribe() {
@@ -32,7 +59,11 @@ function TranscriptionCard() {
     setResult(null);
     setStatus(source === "youtube" ? "Baixando áudio do YouTube..." : "Enviando arquivo...");
     try {
-      const job = await api.createTranscription(source === "upload" ? file : null, source === "youtube" ? youtubeUrl.trim() : undefined);
+      const job = await api.createTranscription(
+        source === "upload" ? file : null,
+        source === "youtube" ? youtubeUrl.trim() : undefined,
+        diarize
+      );
       await poll(job.id);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err));
@@ -43,6 +74,7 @@ function TranscriptionCard() {
   const STATUS_LABELS: Record<string, string> = {
     downloading: "Baixando áudio do YouTube...",
     transcribing: "Transcrevendo áudio (pode demorar um pouco)...",
+    identifying_speakers: "Identificando quem está falando...",
   };
 
   async function poll(jobId: string) {
@@ -104,6 +136,54 @@ function TranscriptionCard() {
           />
         )}
       </div>
+
+      <div className="mt-2">
+        <Toggle
+          checked={diarize}
+          onChange={setDiarize}
+          label="Separar por quem fala"
+          description="Identifica cada pessoa na conversa (ex: [Pessoa 1], [Pessoa 2])"
+        />
+      </div>
+
+      {diarize && hasHfToken === false && (
+        <div className="mt-2 rounded-lg border border-amber-700/40 bg-amber-500/10 p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-amber-300">
+            <KeyRound className="h-4 w-4" /> Token do Hugging Face necessário
+          </div>
+          <p className="mt-1 text-xs text-amber-200/80">
+            Grátis — crie uma conta em{" "}
+            <a href="https://huggingface.co/join" target="_blank" rel="noreferrer" className="underline">
+              huggingface.co
+            </a>
+            , aceite os termos do modelo em{" "}
+            <a
+              href="https://huggingface.co/pyannote/speaker-diarization-3.1"
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              pyannote/speaker-diarization-3.1
+            </a>{" "}
+            e gere um token em{" "}
+            <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noreferrer" className="underline">
+              settings/tokens
+            </a>
+            . Fica salvo localmente, não precisa colar de novo.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <input
+              className="input-field"
+              placeholder="Cole o token aqui"
+              value={hfTokenInput}
+              onChange={(e) => setHfTokenInput(e.target.value)}
+            />
+            <Button variant="secondary" onClick={handleSaveToken} disabled={savingToken || !hfTokenInput.trim()}>
+              Salvar
+            </Button>
+          </div>
+        </div>
+      )}
 
       <Button className="mt-4" onClick={handleTranscribe} disabled={!canSubmit || busy}>
         {busy ? "Transcrevendo..." : "Transcrever"}
@@ -291,7 +371,7 @@ function TextToVideoCard() {
     if (!pexelsKeyInput.trim()) return;
     setSavingKey(true);
     try {
-      const s = await api.saveSettings(pexelsKeyInput.trim());
+      const s = await api.saveSettings({ pexelsApiKey: pexelsKeyInput.trim() });
       setHasPexelsKey(s.has_pexels_key);
       setPexelsKeyInput("");
     } catch (err) {

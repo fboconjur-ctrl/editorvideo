@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from pipeline.background_removal import remove_background
+from pipeline.diarization import diarize_speakers, format_labeled_transcript, label_segments_by_speaker
 from pipeline.enhance import enhance
 from pipeline.ffprobe_utils import probe_duration
 from pipeline.filler_removal import remove_fillers
@@ -22,7 +23,12 @@ from pipeline.stabilize import stabilize
 from pipeline.subtitles import burn_subtitles, write_srt
 from pipeline.timeline_render import render_edl
 from pipeline.transcribe import transcribe
-from pipeline.settings_store import get_pexels_api_key, set_pexels_api_key
+from pipeline.settings_store import (
+    get_huggingface_token,
+    get_pexels_api_key,
+    set_huggingface_token,
+    set_pexels_api_key,
+)
 from pipeline.text_to_video import generate_video_from_text
 from pipeline.tts import list_edge_voices, list_local_voices, synthesize_speech
 from pipeline.upscale import upscale
@@ -378,7 +384,9 @@ async def download_render(job_id: str) -> FileResponse:
 # Sobe um vídeo/áudio e recebe de volta um .txt e um .srt, sem rodar
 # nenhuma outra etapa do pipeline.
 
-TranscriptionStatus = Literal["queued", "downloading", "transcribing", "done", "error"]
+TranscriptionStatus = Literal[
+    "queued", "downloading", "transcribing", "identifying_speakers", "done", "error"
+]
 
 
 class TranscriptionJob(BaseModel):
@@ -392,7 +400,7 @@ class TranscriptionJob(BaseModel):
 TRANSCRIPTION_JOBS: dict[str, TranscriptionJob] = {}
 
 
-def _run_transcription(job_id: str, input_path: Path) -> None:
+def _run_transcription(job_id: str, input_path: Path, diarize: bool = False) -> None:
     job = TRANSCRIPTION_JOBS[job_id]
     try:
         job.status = "transcribing"
@@ -401,8 +409,21 @@ def _run_transcription(job_id: str, input_path: Path) -> None:
         job_dir = OUTPUTS_DIR / job_id
         job_dir.mkdir(exist_ok=True)
 
+        if diarize:
+            job.status = "identifying_speakers"
+            hf_token = get_huggingface_token()
+            if not hf_token:
+                raise RuntimeError(
+                    "Separação por locutor precisa de uma chave gratuita do Hugging Face configurada."
+                )
+            turns = diarize_speakers(input_path, hf_token)
+            labeled = label_segments_by_speaker(segments, turns)
+            txt_content = format_labeled_transcript(labeled)
+        else:
+            txt_content = "\n".join(s.text for s in segments)
+
         txt_path = job_dir / "transcricao.txt"
-        txt_path.write_text("\n".join(s.text for s in segments), encoding="utf-8")
+        txt_path.write_text(txt_content, encoding="utf-8")
 
         srt_path = job_dir / "transcricao.srt"
         write_srt(segments, srt_path)
@@ -415,7 +436,7 @@ def _run_transcription(job_id: str, input_path: Path) -> None:
         job.error = str(exc)
 
 
-def _run_youtube_transcription(job_id: str, input_path: Path, url: str) -> None:
+def _run_youtube_transcription(job_id: str, input_path: Path, url: str, diarize: bool) -> None:
     job = TRANSCRIPTION_JOBS[job_id]
     try:
         job.status = "downloading"
@@ -424,7 +445,7 @@ def _run_youtube_transcription(job_id: str, input_path: Path, url: str) -> None:
         job.status = "error"
         job.error = f"Falha ao baixar áudio do YouTube: {exc}"
         return
-    _run_transcription(job_id, input_path)
+    _run_transcription(job_id, input_path, diarize=diarize)
 
 
 @app.post("/api/transcriptions")
@@ -432,6 +453,7 @@ async def create_transcription(
     background_tasks: BackgroundTasks,
     file: UploadFile | None = File(None),
     youtube_url: str = Form(""),
+    diarize: bool = Form(False),
 ) -> TranscriptionJob:
     youtube_url = youtube_url.strip()
     if not file and not youtube_url:
@@ -446,11 +468,11 @@ async def create_transcription(
     TRANSCRIPTION_JOBS[job_id] = job
 
     if youtube_url:
-        background_tasks.add_task(_run_youtube_transcription, job_id, input_path, youtube_url)
+        background_tasks.add_task(_run_youtube_transcription, job_id, input_path, youtube_url, diarize)
     else:
         with input_path.open("wb") as f:
             shutil.copyfileobj(file.file, f)
-        background_tasks.add_task(_run_transcription, job_id, input_path)
+        background_tasks.add_task(_run_transcription, job_id, input_path, diarize)
 
     return job
 
@@ -547,21 +569,33 @@ async def download_tts(job_id: str) -> FileResponse:
 
 class SettingsInfo(BaseModel):
     has_pexels_key: bool
+    has_huggingface_token: bool
 
 
 class SettingsUpdate(BaseModel):
-    pexels_api_key: str
+    pexels_api_key: str | None = None
+    huggingface_token: str | None = None
+
+
+def _settings_info() -> SettingsInfo:
+    return SettingsInfo(
+        has_pexels_key=bool(get_pexels_api_key()),
+        has_huggingface_token=bool(get_huggingface_token()),
+    )
 
 
 @app.get("/api/settings")
 async def get_settings() -> SettingsInfo:
-    return SettingsInfo(has_pexels_key=bool(get_pexels_api_key()))
+    return _settings_info()
 
 
 @app.post("/api/settings")
 async def update_settings(payload: SettingsUpdate) -> SettingsInfo:
-    set_pexels_api_key(payload.pexels_api_key.strip())
-    return SettingsInfo(has_pexels_key=bool(get_pexels_api_key()))
+    if payload.pexels_api_key is not None:
+        set_pexels_api_key(payload.pexels_api_key.strip())
+    if payload.huggingface_token is not None:
+        set_huggingface_token(payload.huggingface_token.strip())
+    return _settings_info()
 
 
 # --- Texto para vídeo (narração + fotos automáticas) ------------------------

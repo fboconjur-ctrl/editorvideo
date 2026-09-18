@@ -67,7 +67,13 @@ export interface RenderJob {
   result_video: string | null;
 }
 
-export type TranscriptionStatus = "queued" | "downloading" | "transcribing" | "done" | "error";
+export type TranscriptionStatus =
+  | "queued"
+  | "downloading"
+  | "transcribing"
+  | "identifying_speakers"
+  | "done"
+  | "error";
 
 export interface TranscriptionJob {
   id: string;
@@ -105,4 +111,5 @@ export interface TextToVideoJob {
 
 export interface SettingsInfo {
   has_pexels_key: boolean;
+  has_huggingface_token: boolean;
 }
