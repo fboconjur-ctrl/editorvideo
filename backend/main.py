@@ -1,6 +1,7 @@
 """API local do editor de vídeo automático. Nenhuma chamada externa é feita:
 todo o processamento (corte de silêncio, transcrição, legendas) roda na
 própria máquina."""
+import json
 import shutil
 import uuid
 from pathlib import Path
@@ -29,7 +30,7 @@ from pipeline.settings_store import (
     set_huggingface_token,
     set_pexels_api_key,
 )
-from pipeline.text_to_video import generate_video_from_text
+from pipeline.text_to_video import generate_video_from_text, split_into_chunks
 from pipeline.tts import list_edge_voices, list_local_voices, synthesize_speech
 from pipeline.upscale import upscale
 from pipeline.youtube import download_audio
@@ -622,13 +623,21 @@ class TextToVideoJob(BaseModel):
 TEXT_TO_VIDEO_JOBS: dict[str, TextToVideoJob] = {}
 
 
+@app.post("/api/text-to-video/chunks")
+async def preview_text_to_video_chunks(text: str = Form(...)) -> list[str]:
+    """Devolve como o texto vai ser dividido em trechos, sem gerar nada —
+    usado pela interface pra deixar o usuário escolher manualmente qual
+    imagem vai em qual trecho, em vez de adivinhar uma ordem/ciclo."""
+    return split_into_chunks(text)
+
+
 def _run_text_to_video(
     job_id: str,
     text: str,
     engine: str,
     voice_id: str | None,
     rate: int | None,
-    manual_image_paths: list[Path] | None,
+    manual_image_map: dict[int, Path] | None,
 ) -> None:
     job = TEXT_TO_VIDEO_JOBS[job_id]
     try:
@@ -640,7 +649,7 @@ def _run_text_to_video(
         api_key = get_pexels_api_key() or ""
         generate_video_from_text(
             text, output_path, api_key, tts_engine=engine, voice_id=voice_id, rate=rate,
-            manual_image_paths=manual_image_paths,
+            manual_image_map=manual_image_map,
         )
 
         log_path = job_dir / "buscas_de_imagem.log.txt"
@@ -660,25 +669,39 @@ async def create_text_to_video(
     voice_id: str = Form(""),
     rate: int = Form(0),
     manual_images: list[UploadFile] = File(default=[]),
+    chunk_assignments: str = Form(""),
 ) -> TextToVideoJob:
+    """`chunk_assignments`: JSON com uma lista do mesmo tamanho dos trechos
+    do texto, onde cada item é o índice (dentro de `manual_images`) da
+    imagem escolhida manualmente pra aquele trecho, ou `null` pra deixar
+    a busca automática decidir. Isso evita depender de uma ordem/ciclo
+    fixo das imagens enviadas, que na prática o usuário não controla bem
+    (ex: o navegador pode listar os arquivos selecionados fora de ordem)."""
     job_id = str(uuid.uuid4())
 
-    manual_image_paths: list[Path] | None = None
+    manual_image_map: dict[int, Path] | None = None
     if manual_images and manual_images[0].filename:
         images_dir = UPLOADS_DIR / job_id / "manual_images"
         images_dir.mkdir(parents=True, exist_ok=True)
-        manual_image_paths = []
+        saved_paths: list[Path] = []
         for idx, upload in enumerate(manual_images):
             suffix = Path(upload.filename or "").suffix or ".jpg"
             image_path = images_dir / f"img_{idx:03d}{suffix}"
             with image_path.open("wb") as f:
                 shutil.copyfileobj(upload.file, f)
-            manual_image_paths.append(image_path)
+            saved_paths.append(image_path)
+
+        assignments: list[int | None] = json.loads(chunk_assignments) if chunk_assignments else []
+        manual_image_map = {
+            chunk_index: saved_paths[image_index]
+            for chunk_index, image_index in enumerate(assignments)
+            if image_index is not None and 0 <= image_index < len(saved_paths)
+        }
 
     job = TextToVideoJob(id=job_id)
     TEXT_TO_VIDEO_JOBS[job_id] = job
     background_tasks.add_task(
-        _run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None, manual_image_paths,
+        _run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None, manual_image_map,
     )
     return job
 

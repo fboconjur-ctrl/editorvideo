@@ -387,17 +387,19 @@ def generate_video_from_text(
     tts_engine: str = "edge",
     voice_id: str | None = None,
     rate: int | None = None,
-    manual_image_paths: list[Path] | None = None,
+    manual_image_map: dict[int, Path] | None = None,
 ) -> None:
-    """`manual_image_paths`: quando o usuário sobe suas próprias imagens
-    (porque a busca automática traz fotos artificiais/genéricas demais pro
-    tema), elas são usadas em vez da busca automática — uma por trecho, na
-    ordem em que foram enviadas, repetindo em ciclo se houver menos
-    imagens do que trechos de texto."""
+    """`manual_image_map`: mapa opcional {índice do trecho: caminho da
+    imagem} para os trechos onde o usuário escolheu manualmente uma foto
+    (porque a busca automática às vezes traz fotos artificiais/genéricas
+    demais pro tema). Um trecho sem entrada no mapa cai na busca
+    automática normal — dá pra misturar os dois num mesmo vídeo, em vez
+    de ser tudo automático ou tudo manual."""
     chunks = split_into_chunks(text)
     if not chunks:
         raise ValueError("Texto vazio.")
 
+    manual_image_map = manual_image_map or {}
     query_log_lines = []
     used_media_ids: set[str] = set()
 
@@ -412,9 +414,9 @@ def generate_video_from_text(
 
             segment_path = tmp / f"segment_{i}.mp4"
 
-            if manual_image_paths:
-                chosen_path = manual_image_paths[i % len(manual_image_paths)]
-                media_type, media_bytes, source_desc = "photo", chosen_path.read_bytes(), f"manual:{chosen_path.name}"
+            manual_path = manual_image_map.get(i)
+            if manual_path:
+                media_type, media_bytes, source_desc = "photo", manual_path.read_bytes(), f"manual:{manual_path.name}"
             else:
                 media_type, media_bytes, source_desc = resolve_media_for_chunk(
                     chunk, pexels_api_key, used_media_ids, chunk_index=i

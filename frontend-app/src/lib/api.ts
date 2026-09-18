@@ -150,12 +150,19 @@ export function saveSettings(settings: { pexelsApiKey?: string; huggingfaceToken
   });
 }
 
+export function previewTextToVideoChunks(text: string): Promise<string[]> {
+  const formData = new FormData();
+  formData.append("text", text);
+  return request<string[]>("/api/text-to-video/chunks", { method: "POST", body: formData });
+}
+
 export function createTextToVideo(
   text: string,
   engine: TtsEngine,
   rate: number,
   voiceId?: string,
-  manualImages?: File[]
+  manualImages?: File[],
+  chunkAssignments?: (number | null)[]
 ): Promise<TextToVideoJob> {
   const formData = new FormData();
   formData.append("text", text);
@@ -164,6 +171,9 @@ export function createTextToVideo(
   if (voiceId) formData.append("voice_id", voiceId);
   for (const image of manualImages ?? []) {
     formData.append("manual_images", image);
+  }
+  if (chunkAssignments) {
+    formData.append("chunk_assignments", JSON.stringify(chunkAssignments));
   }
   return request<TextToVideoJob>("/api/text-to-video", { method: "POST", body: formData });
 }

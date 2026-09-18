@@ -359,7 +359,12 @@ function TextToVideoCard() {
   const [hasPexelsKey, setHasPexelsKey] = useState<boolean | null>(null);
   const [pexelsKeyInput, setPexelsKeyInput] = useState("");
   const [savingKey, setSavingKey] = useState(false);
+
   const [manualImages, setManualImages] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [chunks, setChunks] = useState<string[] | null>(null);
+  const [assignments, setAssignments] = useState<(number | null)[]>([]);
+  const [loadingChunks, setLoadingChunks] = useState(false);
 
   useEffect(() => {
     api
@@ -367,6 +372,45 @@ function TextToVideoCard() {
       .then((s) => setHasPexelsKey(s.has_pexels_key))
       .catch(() => setHasPexelsKey(false));
   }, []);
+
+  // As pré-visualizações são URLs de objeto locais (não sobem nada) — só
+  // servem pra reconhecer visualmente qual arquivo é qual na hora de
+  // escolher a imagem de cada trecho.
+  useEffect(() => {
+    const urls = manualImages.map((f) => URL.createObjectURL(f));
+    setImagePreviews(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [manualImages]);
+
+  function handleTextChange(value: string) {
+    setText(value);
+    // Muda o texto -> os trechos anteriores não valem mais (índices
+    // podem não bater mais com as frases certas).
+    setChunks(null);
+    setAssignments([]);
+  }
+
+  async function handleSplitChunks() {
+    if (!text.trim()) return;
+    setLoadingChunks(true);
+    try {
+      const result = await api.previewTextToVideoChunks(text);
+      setChunks(result);
+      setAssignments(result.map(() => null));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingChunks(false);
+    }
+  }
+
+  function setAssignment(chunkIndex: number, imageIndex: number | null) {
+    setAssignments((prev) => {
+      const next = [...prev];
+      next[chunkIndex] = imageIndex;
+      return next;
+    });
+  }
 
   async function handleSaveKey() {
     if (!pexelsKeyInput.trim()) return;
@@ -387,14 +431,20 @@ function TextToVideoCard() {
     setBusy(true);
     setVideoUrl(null);
     setLogUrl(null);
+    const hasManualAssignment = assignments.some((a) => a !== null);
     setStatus(
-      manualImages.length > 0
-        ? "Gerando narração e montando o vídeo com suas imagens (pode demorar alguns minutos)..."
+      hasManualAssignment
+        ? "Gerando narração e montando o vídeo (usando suas imagens nos trechos escolhidos)..."
         : "Gerando narração e buscando imagens (pode demorar alguns minutos)..."
     );
     try {
       const job = await api.createTextToVideo(
-        text, selection.engine, Number(rate) || 0, selection.voiceId || undefined, manualImages
+        text,
+        selection.engine,
+        Number(rate) || 0,
+        selection.voiceId || undefined,
+        manualImages,
+        chunks ? assignments : undefined
       );
       await poll(job.id);
     } catch (err) {
@@ -463,7 +513,7 @@ function TextToVideoCard() {
         className="input-field mt-4 min-h-[140px] resize-y"
         placeholder="Cole o texto que vai virar o vídeo narrado..."
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => handleTextChange(e.target.value)}
       />
 
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -481,9 +531,9 @@ function TextToVideoCard() {
           Usar minhas próprias imagens (opcional)
         </label>
         <p className="mt-1 text-xs text-slate-500">
-          As fotos buscadas automaticamente às vezes ficam artificiais/genéricas demais. Se preferir,
-          suba aqui as imagens que quer usar — elas são distribuídas em ordem pelos trechos do texto
-          (repetindo em ciclo se houver menos imagens do que trechos), em vez de buscar no Pexels/Wikipedia.
+          A busca automática às vezes traz fotos artificiais/genéricas demais. Suba suas imagens aqui
+          e depois escolha exatamente qual foto vai em cada trecho do texto — dá pra deixar alguns
+          trechos no automático e só substituir os que ficaram ruins.
         </p>
         <input
           type="file"
@@ -492,10 +542,50 @@ function TextToVideoCard() {
           className="input-field mt-2"
           onChange={(e) => setManualImages(Array.from(e.target.files ?? []))}
         />
+
         {manualImages.length > 0 && (
-          <p className="mt-1 text-xs text-emerald-400">
-            {manualImages.length} imagem(ns) selecionada(s) — a busca automática será ignorada.
-          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {imagePreviews.map((url, i) => (
+              <div key={i} className="flex flex-col items-center gap-1">
+                <img src={url} alt={manualImages[i]?.name} className="h-14 w-14 rounded object-cover" />
+                <span className="max-w-[3.5rem] truncate text-[10px] text-slate-500">{manualImages[i]?.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-3 flex items-center gap-2">
+          <Button variant="secondary" onClick={handleSplitChunks} disabled={!text.trim() || loadingChunks}>
+            {loadingChunks ? "Dividindo..." : "Dividir texto em trechos"}
+          </Button>
+          {chunks && (
+            <span className="text-xs text-slate-500">{chunks.length} trecho(s) — escolha a imagem de cada um abaixo</span>
+          )}
+        </div>
+
+        {chunks && chunks.length > 0 && (
+          <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+            {chunks.map((chunk, i) => (
+              <div key={i} className="flex items-center gap-2 rounded-lg border border-base-800 bg-base-950 p-2">
+                <span className="flex-1 truncate text-xs text-slate-300" title={chunk}>
+                  {i + 1}. {chunk}
+                </span>
+                <select
+                  className="input-field !mt-0 w-40 shrink-0 text-xs"
+                  value={assignments[i] ?? ""}
+                  onChange={(e) => setAssignment(i, e.target.value === "" ? null : Number(e.target.value))}
+                  disabled={manualImages.length === 0}
+                >
+                  <option value="">Automático</option>
+                  {manualImages.map((f, imgIdx) => (
+                    <option key={imgIdx} value={imgIdx}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
