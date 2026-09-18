@@ -1,0 +1,210 @@
+[
+  {
+    "pattern": "supremo tribunal federal|\\bstf\\b",
+    "wiki_title": "Supremo Tribunal Federal",
+    "queries_en": [
+      "courthouse justice gavel"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "tribunal superior eleitoral|\\btse\\b",
+    "wiki_title": "Tribunal Superior Eleitoral",
+    "queries_en": [
+      "courthouse justice gavel"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "congresso nacional|senado federal|câmara dos deputados",
+    "wiki_title": "Congresso Nacional",
+    "queries_en": [
+      "government building"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "planalto|presidência da república",
+    "wiki_title": "Palácio do Planalto",
+    "queries_en": [
+      "government building"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "bolsa família",
+    "wiki_title": "Bolsa Família",
+    "queries_en": [
+      "social welfare family"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "sistema único de saúde|\\bsus\\b",
+    "wiki_title": "Sistema Único de Saúde",
+    "queries_en": [
+      "hospital healthcare"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "polícia federal",
+    "wiki_title": "Polícia Federal (Brasil)",
+    "queries_en": [
+      "police security"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "\\bpix\\b",
+    "wiki_title": null,
+    "queries_en": [
+      "mobile payment brazil",
+      "phone payment qr code"
+    ],
+    "queries_pt": [
+      "pix smartphone",
+      "pagamento celular",
+      "QR Code pagamento"
+    ]
+  },
+  {
+    "pattern": "banco central|\\bbacen\\b",
+    "wiki_title": "Banco Central do Brasil",
+    "queries_en": [
+      "brazilian central bank"
+    ],
+    "queries_pt": [
+      "Banco Central Brasília"
+    ]
+  },
+  {
+    "pattern": "conta[- ]sal[aá]rio",
+    "wiki_title": null,
+    "queries_en": [
+      "salary account worker",
+      "worker mobile banking"
+    ],
+    "queries_pt": [
+      "trabalhador aplicativo banco"
+    ]
+  },
+  {
+    "pattern": "boleto",
+    "wiki_title": null,
+    "queries_en": [
+      "paying bill smartphone",
+      "barcode bill payment"
+    ],
+    "queries_pt": [
+      "boleto bancário",
+      "código de barras boleto"
+    ]
+  },
+  {
+    "pattern": "fraude",
+    "wiki_title": null,
+    "queries_en": [
+      "banking fraud alert",
+      "digital banking security"
+    ],
+    "queries_pt": [
+      "alerta fraude celular"
+    ]
+  },
+  {
+    "pattern": "instituição financeira|\\bbanco\\b|bancári",
+    "wiki_title": null,
+    "queries_en": [
+      "bank customer service",
+      "financial institution"
+    ],
+    "queries_pt": [
+      "atendimento bancário"
+    ]
+  },
+  {
+    "pattern": "pagamento recorrente|contas? mensa(l|is)",
+    "wiki_title": null,
+    "queries_en": [
+      "recurring payment bills"
+    ],
+    "queries_pt": [
+      "contas mensais energia telefone"
+    ]
+  },
+  {
+    "pattern": "\\bprazo\\b",
+    "wiki_title": null,
+    "queries_en": [
+      "calendar deadline"
+    ],
+    "queries_pt": [
+      "calendário"
+    ]
+  },
+  {
+    "pattern": "tribunal|justiça|juiz|ministro|stj|processo jurídico|julgamento",
+    "wiki_title": null,
+    "queries_en": [
+      "courthouse justice gavel"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "eleiç|eleitoral|candidat|voto|urna|campanha eleitoral",
+    "wiki_title": null,
+    "queries_en": [
+      "election vote ballot"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "governo|federal|presidente|ministério",
+    "wiki_title": null,
+    "queries_en": [
+      "government building"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "benefício|auxílio|programa social|inss|aposentadoria",
+    "wiki_title": null,
+    "queries_en": [
+      "social welfare family"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "r\\$|reais|bilhõ|milhõ|orçamento|contas públicas|dinheiro|valor(es)?\\b|reajuste|folha (de pagamento|salarial)|salári|inflaç|econom",
+    "wiki_title": null,
+    "queries_en": [
+      "money finance"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "saúde|hospital|médic|vacina",
+    "wiki_title": null,
+    "queries_en": [
+      "hospital healthcare"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "educaç|escola|estudante|universidade|professor",
+    "wiki_title": null,
+    "queries_en": [
+      "school education classroom"
+    ],
+    "queries_pt": []
+  },
+  {
+    "pattern": "polícia|segurança pública|crime|violência",
+    "wiki_title": null,
+    "queries_en": [
+      "police security"
+    ],
+    "queries_pt": []
+  }
+]

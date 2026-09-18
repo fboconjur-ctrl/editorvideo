@@ -726,6 +726,7 @@ def _run_text_to_video(
     use_outro: bool,
     use_webcam: bool,
     webcam_position: str,
+    prefer_photos: bool,
 ) -> None:
     job = TEXT_TO_VIDEO_JOBS[job_id]
     try:
@@ -747,6 +748,7 @@ def _run_text_to_video(
             outro_video_path=get_bumper_path("outro") if use_outro else None,
             webcam_video_path=get_random_webcam_clip() if use_webcam else None,
             webcam_position=webcam_position,
+            prefer_photos=prefer_photos,
         )
 
         thumbnail_path = None
@@ -784,6 +786,7 @@ async def create_text_to_video(
     use_outro: bool = Form(True),
     use_webcam: bool = Form(True),
     webcam_position: str = Form("bottom-right"),
+    prefer_photos: bool = Form(True),
 ) -> TextToVideoJob:
     """`chunk_assignments`: JSON com uma lista do mesmo tamanho dos trechos
     do texto, onde cada item é o índice (dentro de `manual_images`) da
@@ -830,7 +833,7 @@ async def create_text_to_video(
     background_tasks.add_task(
         _run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None, manual_image_map,
         subtitles_enabled, subtitle_font_size or None, subtitle_position, subtitle_style, orientation,
-        cover_image_path, use_intro, use_outro, use_webcam, webcam_position,
+        cover_image_path, use_intro, use_outro, use_webcam, webcam_position, prefer_photos,
     )
     return job
 

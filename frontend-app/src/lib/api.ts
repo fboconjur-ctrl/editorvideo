@@ -170,7 +170,8 @@ export function createTextToVideo(
   useOutro?: boolean,
   useWebcam?: boolean,
   webcamPosition?: WebcamPosition,
-  subtitleStyle?: "static" | "karaoke"
+  subtitleStyle?: "static" | "karaoke",
+  preferPhotos?: boolean
 ): Promise<TextToVideoJob> {
   const formData = new FormData();
   formData.append("text", text);
@@ -195,6 +196,7 @@ export function createTextToVideo(
   formData.append("use_outro", String(useOutro ?? true));
   formData.append("use_webcam", String(useWebcam ?? true));
   formData.append("webcam_position", webcamPosition ?? "bottom-right");
+  formData.append("prefer_photos", String(preferPhotos ?? true));
   return request<TextToVideoJob>("/api/text-to-video", { method: "POST", body: formData });
 }
 

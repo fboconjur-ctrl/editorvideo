@@ -3,9 +3,12 @@ curtos, narra cada um (TTS), e busca uma mídia relacionada pra cada
 trecho — nessa ordem de qualidade: foto real (Wikipedia) > vídeo de banco
 (Pexels) > foto de banco (Pexels) > fundo sólido. Monta tudo com transição
 suave (fade) entre os cortes, sincronizado com o áudio de cada trecho."""
+import json
 import re
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import requests
@@ -53,36 +56,101 @@ _yake_extractor = yake.KeywordExtractor(lan="pt", n=2, top=3, dedupLim=0.9)
 # ele devolve pra esses temas são de tribunais/prédios de outros países,
 # o que destoa bastante num vídeo sobre notícia brasileira. Por isso, pra
 # cada tema, tentamos primeiro achar a foto REAL da instituição brasileira
-# no Wikipedia (wiki_title) antes de cair pro termo genérico em inglês no
-# Pexels (fallback_query).
-_CONCEPT_MAP: list[tuple[re.Pattern, str | None, str]] = [
-    (re.compile(r"supremo tribunal federal|\bstf\b", re.I), "Supremo Tribunal Federal", "courthouse justice gavel"),
-    (re.compile(r"tribunal superior eleitoral|\btse\b", re.I), "Tribunal Superior Eleitoral", "courthouse justice gavel"),
-    (re.compile(r"tribunal|justiça|juiz|ministro|stj|processo jurídico|julgamento", re.I), None, "courthouse justice gavel"),
-    (re.compile(r"eleiç|eleitoral|candidat|voto|urna|campanha eleitoral", re.I), None, "election vote ballot"),
-    (re.compile(r"congresso nacional|senado federal|câmara dos deputados", re.I), "Congresso Nacional", "government building"),
-    (re.compile(r"planalto|presidência da república", re.I), "Palácio do Planalto", "government building"),
-    (re.compile(r"governo|federal|presidente|ministério", re.I), None, "government building"),
-    (re.compile(r"bolsa família", re.I), "Bolsa Família", "social welfare family"),
-    (re.compile(r"benefício|auxílio|programa social|inss|aposentadoria", re.I), None, "social welfare family"),
-    (re.compile(r"r\$|reais|bilhõ|milhõ|orçamento|contas públicas|dinheiro|valor(es)?\b|reajuste|pagamento|folha (de pagamento|salarial)|salári|inflaç|econom", re.I), None, "money finance"),
-    (re.compile(r"sistema único de saúde|\bsus\b", re.I), "Sistema Único de Saúde", "hospital healthcare"),
-    (re.compile(r"saúde|hospital|médic|vacina", re.I), None, "hospital healthcare"),
-    (re.compile(r"educaç|escola|estudante|universidade|professor", re.I), None, "school education classroom"),
-    (re.compile(r"polícia federal", re.I), "Polícia Federal (Brasil)", "police security"),
-    (re.compile(r"polícia|segurança pública|crime|violência", re.I), None, "police security"),
-]
+# no Wikipedia (wiki_title) antes de cair pros termos genéricos (em
+# português e/ou inglês) no Pexels.
+#
+# O dicionário fica num arquivo JSON à parte (não hardcoded aqui) pra dar
+# pra ampliar/ajustar os temas sem precisar mexer em código Python — só
+# editar editorial_visual_map.json e reiniciar o servidor. Ordem importa:
+# entradas mais ESPECÍFICAS (ex: "pix", "banco central") vêm antes das
+# mais GENÉRICAS (ex: "banco", "econom") pra não serem "engolidas" por um
+# padrão genérico que também bateria.
+_EDITORIAL_MAP_PATH = Path(__file__).parent / "data" / "editorial_visual_map.json"
 
 
-def concept_match(chunk_text: str) -> tuple[str | None, str] | None:
-    """Se o trecho bater com algum tema de notícia conhecido, devolve
-    (título pra buscar no Wikipedia ou None, termo genérico de reserva
-    pro Pexels). Retorna None se nada bater (cai pro fluxo normal de
-    extração+tradução)."""
-    for pattern, wiki_title, fallback_query in _CONCEPT_MAP:
-        if pattern.search(chunk_text):
-            return wiki_title, fallback_query
+@dataclass
+class EditorialEntry:
+    pattern: re.Pattern
+    wiki_title: str | None
+    queries_en: list[str]
+    queries_pt: list[str]
+
+
+def _load_editorial_map() -> list[EditorialEntry]:
+    raw = json.loads(_EDITORIAL_MAP_PATH.read_text(encoding="utf-8"))
+    return [
+        EditorialEntry(
+            pattern=re.compile(entry["pattern"], re.I),
+            wiki_title=entry.get("wiki_title"),
+            queries_en=entry.get("queries_en") or [],
+            queries_pt=entry.get("queries_pt") or [],
+        )
+        for entry in raw
+    ]
+
+
+_EDITORIAL_MAP: list[EditorialEntry] = _load_editorial_map()
+
+# Palavras genéricas que, sozinhas, não dizem nada específico sobre o
+# tema visual (ex: "instituição" tanto pode ser um banco quanto uma ONG
+# quanto uma escola) — quando o trecho só produz uma dessas E não bate em
+# nenhuma entrada específica do dicionário editorial, usamos o contexto
+# geral da matéria (ver `ArticleContext`) pra desambiguar, em vez de
+# traduzir a palavra genérica sozinha e buscar algo raso.
+_AMBIGUOUS_GENERIC_WORDS = {
+    "instituição", "instituições", "empresa", "empresas", "serviço", "serviços",
+    "sistema", "processo", "caso", "medida", "medidas", "decisão", "órgão", "órgãos",
+}
+_WORD_SPLIT_RE = re.compile(r"[^\wà-úÀ-Ú]+")
+
+
+def _has_ambiguous_generic_word(text: str) -> bool:
+    words = {w for w in _WORD_SPLIT_RE.split(text.lower()) if w}
+    return not words.isdisjoint(_AMBIGUOUS_GENERIC_WORDS)
+
+
+def concept_match(chunk_text: str) -> EditorialEntry | None:
+    """Se o trecho bater com algum tema de notícia conhecido, devolve a
+    entrada do dicionário editorial correspondente. Retorna None se nada
+    bater (cai pro fluxo normal de extração+tradução)."""
+    for entry in _EDITORIAL_MAP:
+        if entry.pattern.search(chunk_text):
+            return entry
     return None
+
+
+@dataclass
+class ArticleContext:
+    """Contexto da matéria inteira, calculado uma vez no início da
+    geração — usado pra desambiguar termos genéricos dentro de um trecho
+    (ex: "instituição" sozinho, numa matéria sobre Pix/Banco Central,
+    provavelmente quer dizer "instituição financeira")."""
+    dominant_terms: list[str] = field(default_factory=list)
+    primary_concept: EditorialEntry | None = None
+
+
+def build_article_context(full_text: str) -> ArticleContext:
+    """Roda uma vez sobre o texto INTEIRO (não só um trecho) pra achar do
+    que a matéria trata de forma geral. Isso não é IA generativa — é só
+    reaproveitar o YAKE (já usado por trecho) numa escala maior, mais o
+    dicionário editorial já existente."""
+    dominant_terms: list[str] = []
+    try:
+        keywords = _yake_extractor.extract_keywords(full_text)
+        dominant_terms = [phrase for phrase, _score in sorted(keywords, key=lambda kw: kw[1])]
+    except Exception:  # noqa: BLE001 - contexto é best-effort, nunca deve travar a geração
+        pass
+
+    # O "conceito primário" da matéria é a primeira entrada do dicionário
+    # editorial que aparece em QUALQUER lugar do texto completo (mesma
+    # ordem de prioridade especificidade>genérico usada por trecho).
+    primary_concept = None
+    for entry in _EDITORIAL_MAP:
+        if entry.pattern.search(full_text):
+            primary_concept = entry
+            break
+
+    return ArticleContext(dominant_terms=dominant_terms, primary_concept=primary_concept)
 
 
 def looks_like_proper_name(phrase: str) -> bool:
@@ -154,6 +222,18 @@ def split_into_chunks(text: str, max_words: int = MAX_WORDS_PER_CHUNK) -> list[s
     if current:
         chunks.append(" ".join(current))
     return chunks
+
+
+def search_wikipedia_image_cached(title: str, cache: dict[str, bytes | None]) -> bytes | None:
+    """Como `search_wikipedia_image`, mas evita repetir a mesma consulta
+    de rede se o título já foi buscado antes NESSA geração (ex: "Banco
+    Central" mencionado em 3 trechos diferentes da mesma matéria)."""
+    key = f"wiki:{title}"
+    if key in cache:
+        return cache[key]
+    result = search_wikipedia_image(title)
+    cache[key] = result
+    return result
 
 
 def search_wikipedia_image(title: str) -> bytes | None:
@@ -247,17 +327,55 @@ def search_pexels_video(
 
 
 def _try_pexels(
-    query: str, api_key: str, used_ids: set[str], orientation: str, target_width: int
+    query: str, api_key: str, used_ids: set[str], orientation: str, target_width: int,
+    prefer_photos: bool = True,
 ) -> tuple[str, bytes, str] | None:
-    """Tenta um vídeo e, se não achar, uma foto no Pexels pra essa query.
-    Retorna None se nenhum dos dois achar nada (query ruim ou já toda
-    usada), pra o chamador poder tentar outra query em vez de desistir."""
-    video = search_pexels_video(query, api_key, used_ids, orientation=orientation, target_width=target_width)
-    if video:
-        return "video", video, f"pexels-video:{query}"
-    photo = search_pexels_photo(query, api_key, used_ids, orientation=orientation)
-    if photo:
-        return "photo", photo, f"pexels-photo:{query}"
+    """Tenta foto e vídeo no Pexels pra essa query (ordem controlada por
+    `prefer_photos` — fotos primeiro é bem mais rápido que baixar vídeo,
+    então é o padrão pro modo jornalístico/velocidade). Retorna None se
+    nenhum dos dois achar nada (query ruim ou já toda usada), pra o
+    chamador poder tentar outra query em vez de desistir."""
+    if prefer_photos:
+        photo = search_pexels_photo(query, api_key, used_ids, orientation=orientation)
+        if photo:
+            return "photo", photo, f"pexels-photo:{query}"
+        video = search_pexels_video(query, api_key, used_ids, orientation=orientation, target_width=target_width)
+        if video:
+            return "video", video, f"pexels-video:{query}"
+    else:
+        video = search_pexels_video(query, api_key, used_ids, orientation=orientation, target_width=target_width)
+        if video:
+            return "video", video, f"pexels-video:{query}"
+        photo = search_pexels_photo(query, api_key, used_ids, orientation=orientation)
+        if photo:
+            return "photo", photo, f"pexels-photo:{query}"
+    return None
+
+
+def _try_pexels_multi(
+    queries: list[str], api_key: str, used_ids: set[str], orientation: str, target_width: int,
+    prefer_photos: bool = True,
+) -> tuple[str, bytes, str] | None:
+    """Dispara a busca de várias queries candidatas EM PARALELO (em vez
+    de uma de cada vez, esperando cada resposta terminar antes de tentar
+    a próxima) — reduz bastante o tempo total quando a primeira query não
+    acha nada. Usa a primeira que trouxer resultado; um timeout total
+    evita que uma fonte lenta trave a geração do vídeo inteiro."""
+    unique_queries = list(dict.fromkeys(q.strip() for q in queries if q and q.strip()))
+    if not unique_queries:
+        return None
+    with ThreadPoolExecutor(max_workers=min(4, len(unique_queries))) as executor:
+        futures = [
+            executor.submit(_try_pexels, q, api_key, used_ids, orientation, target_width, prefer_photos)
+            for q in unique_queries
+        ]
+        try:
+            for future in as_completed(futures, timeout=20):
+                result = future.result()
+                if result:
+                    return result
+        except FuturesTimeoutError:
+            pass
     return None
 
 
@@ -267,11 +385,20 @@ def resolve_media_for_chunk(
     used_ids: set[str],
     chunk_index: int = 0,
     resolution: tuple[int, int] = HORIZONTAL_RESOLUTION,
+    context: ArticleContext | None = None,
+    cache: dict[str, bytes | None] | None = None,
+    prefer_photos: bool = True,
 ) -> tuple[str, bytes | None, str]:
     """Decide e busca a melhor mídia pro trecho. Retorna (tipo, bytes,
     descrição da fonte pro log de diagnóstico), onde tipo é "photo",
     "video" ou "color" (fundo sólido, usado só quando TODAS as tentativas
     abaixo falharem).
+
+    `context`: perfil da matéria inteira (ver `build_article_context`),
+    usado pra desambiguar termos genéricos do trecho atual.
+    `cache`: memoiza buscas na Wikipedia já feitas nessa mesma geração
+    (evita repetir a mesma consulta de rede pra um título já buscado).
+    `prefer_photos`: tenta foto antes de vídeo no Pexels (mais rápido).
 
     Ordem de prioridade:
     1. Frase-chave extraída parece nome de pessoa -> tenta achar ESSA
@@ -281,68 +408,89 @@ def resolve_media_for_chunk(
        genérico "ministro/tribunal" — e a foto da pessoa específica é
        sempre mais relevante do que o conceito genérico da instituição.
     2. Tema de notícia com instituição brasileira conhecida (STF, TSE,
-       Planalto, Congresso...) -> tenta a foto REAL dela no Wikipedia.
-    3. Define a query de busca (genérica do tema, ou frase-chave
-       traduzida) e tenta um VÍDEO no Pexels primeiro (mais dinâmico),
-       depois uma FOTO no Pexels.
-    4. Se a query principal não achar nada, tenta as outras frases-chave
-       candidatas do YAKE (nem sempre a "melhor" segundo o score é a que
-       tem cobertura no banco de imagens).
-    5. Se ainda assim nada for encontrado, tenta uma query genérica de
-       "notícia" (girando entre algumas opções) em vez de ir direto pro
-       fundo sólido — um trecho sem palavra-chave específica (conectivos,
-       transições) não precisa terminar sem nenhuma imagem.
-    6. Só cai pro fundo sólido se NENHUMA busca acima trouxe resultado
+       Planalto, Congresso, Pix, Banco Central...) -> tenta a foto REAL
+       dela no Wikipedia; se não achar, usa as várias queries visuais
+       cadastradas pra esse tema no dicionário editorial.
+    3. Trecho genérico (sem nome próprio nem tema específico) mas com uma
+       palavra ambígua (ex: "instituição") E a matéria tem um tema
+       dominante conhecido -> usa as queries desse tema em vez de
+       traduzir a palavra genérica sozinha.
+    4. Todas as queries da etapa atual são tentadas EM PARALELO no Pexels
+       (foto/vídeo conforme `prefer_photos`).
+    5. Se nada disso achar nada, tenta as outras frases-chave candidatas
+       do YAKE (nem sempre a "melhor" segundo o score é a que tem
+       cobertura no banco de imagens) — também em paralelo.
+    6. Se ainda assim nada for encontrado, prioriza as queries do tema
+       dominante da matéria (se houver) antes de cair pra uma query
+       genérica de "notícia" totalmente desconectada do assunto.
+    7. Só cai pro fundo sólido se NENHUMA busca acima trouxe resultado
        (banco sem internet, chave inválida, ou tudo já usado no vídeo).
     """
+    cache = cache if cache is not None else {}
     keyphrases_pt = extract_keyphrases(chunk_text)
     keyphrase_pt = keyphrases_pt[0] if keyphrases_pt else chunk_text
 
     if looks_like_proper_name(keyphrase_pt):
-        image = search_wikipedia_image(keyphrase_pt)
+        image = search_wikipedia_image_cached(keyphrase_pt, cache)
         if image:
             return "photo", image, f"wikipedia:{keyphrase_pt}"
 
     match = concept_match(chunk_text)
     if match:
-        wiki_title, fallback_query = match
-        if wiki_title:
-            image = search_wikipedia_image(wiki_title)
+        if match.wiki_title:
+            image = search_wikipedia_image_cached(match.wiki_title, cache)
             if image:
-                return "photo", image, f"wikipedia:{wiki_title}"
-        query = fallback_query
+                return "photo", image, f"wikipedia:{match.wiki_title}"
+        candidate_queries = [*match.queries_pt, *match.queries_en]
     elif looks_like_proper_name(keyphrase_pt):
-        query = "press conference news"
+        candidate_queries = ["press conference news"]
+    elif (
+        context
+        and context.primary_concept
+        and _has_ambiguous_generic_word(chunk_text)
+    ):
+        # Trecho não bateu em nenhum tema específico, mas menciona uma
+        # palavra genérica (ex: "instituição") — usa o tema dominante da
+        # matéria inteira pra desambiguar, em vez de traduzir a palavra
+        # genérica sozinha (checa o TRECHO, não só a frase-chave do YAKE,
+        # porque o YAKE costuma devolver frases de 2 palavras como
+        # "instituição confirmou", que não bateria numa lista de palavras
+        # soltas).
+        candidate_queries = [*context.primary_concept.queries_pt, *context.primary_concept.queries_en]
     else:
-        query = translate_to_english(keyphrase_pt)
+        candidate_queries = [translate_to_english(keyphrase_pt)]
 
     if api_key:
         width, height = resolution
         orientation = "portrait" if height > width else "landscape"
 
-        found = _try_pexels(query, api_key, used_ids, orientation, width)
+        found = _try_pexels_multi(candidate_queries, api_key, used_ids, orientation, width, prefer_photos)
         if found:
             return found
 
-        # Primeira query não achou nada: tenta as outras frases-chave
-        # candidatas antes de desistir (traduzidas, evitando repetir a
-        # primeira query já tentada).
-        for alt_phrase in keyphrases_pt[1:3]:
-            alt_query = translate_to_english(alt_phrase)
-            if alt_query.strip().lower() == query.strip().lower():
-                continue
-            found = _try_pexels(alt_query, api_key, used_ids, orientation, width)
-            if found:
-                return found
-
-        # Ainda nada: usa uma query genérica de notícia em vez de fundo
-        # sólido, girando pela lista pra variar entre trechos.
-        generic_query = _GENERIC_NEWS_QUERIES[chunk_index % len(_GENERIC_NEWS_QUERIES)]
-        found = _try_pexels(generic_query, api_key, used_ids, orientation, width)
+        # Nada nas queries principais: tenta as outras frases-chave
+        # candidatas do YAKE, também em paralelo.
+        already_tried = {q.strip().lower() for q in candidate_queries}
+        alt_queries = [
+            translate_to_english(p) for p in keyphrases_pt[1:3]
+            if p.strip().lower() not in already_tried
+        ]
+        found = _try_pexels_multi(alt_queries, api_key, used_ids, orientation, width, prefer_photos)
         if found:
             return found
 
-    return "color", None, query
+        # Ainda nada: prioriza o tema dominante da matéria (se houver)
+        # antes da query genérica de notícia desconectada do assunto.
+        fallback_queries: list[str] = []
+        if context and context.primary_concept:
+            fallback_queries.extend(context.primary_concept.queries_pt)
+            fallback_queries.extend(context.primary_concept.queries_en)
+        fallback_queries.append(_GENERIC_NEWS_QUERIES[chunk_index % len(_GENERIC_NEWS_QUERIES)])
+        found = _try_pexels_multi(fallback_queries, api_key, used_ids, orientation, width, prefer_photos)
+        if found:
+            return found
+
+    return "color", None, candidate_queries[0] if candidate_queries else keyphrase_pt
 
 
 def _fade_filter(duration: float) -> str:
@@ -548,6 +696,7 @@ def generate_video_from_text(
     outro_video_path: Path | None = None,
     webcam_video_path: Path | None = None,
     webcam_position: str = "bottom-right",
+    prefer_photos: bool = True,
 ) -> None:
     """`manual_image_map`: mapa opcional {índice do trecho: caminho do
     arquivo} para os trechos onde o usuário escolheu manualmente uma foto
@@ -580,7 +729,11 @@ def generate_video_from_text(
     reagindo/acompanhando em silêncio) pra sobrepor num canto da tela
     durante o conteúdo narrado (não durante abertura/encerramento) — dá
     uma camada humana/autoral ao vídeo, importante pra não parecer 100%
-    automatizado. Repete em loop se for mais curto que o conteúdo."""
+    automatizado. Repete em loop se for mais curto que o conteúdo.
+
+    `prefer_photos`: tenta foto antes de vídeo nas buscas automáticas do
+    Pexels (mais rápido — baixar vídeo é bem mais pesado que baixar
+    foto). Ativado por padrão."""
     chunks = split_into_chunks(text)
     if not chunks:
         raise ValueError("Texto vazio.")
@@ -591,6 +744,12 @@ def generate_video_from_text(
     # fornece — com o motor local, cai pro estilo estático automaticamente
     # em vez de gerar uma legenda sem efeito nenhum (ou dar erro).
     karaoke_active = subtitles_enabled and subtitle_style == "karaoke" and tts_engine == "edge"
+
+    # Contexto da matéria inteira (uma vez só) + cache de buscas — usados
+    # pra desambiguar termos genéricos por trecho e evitar repetir a
+    # mesma consulta de rede várias vezes na mesma geração.
+    article_context = build_article_context(text)
+    search_cache: dict[str, bytes | None] = {}
 
     manual_image_map = manual_image_map or {}
     query_log_lines = []
@@ -632,7 +791,8 @@ def generate_video_from_text(
                     _build_segment_from_image(manual_path, audio_path, duration, segment_path, resolution=resolution)
             else:
                 media_type, media_bytes, source_desc = resolve_media_for_chunk(
-                    chunk, pexels_api_key, used_media_ids, chunk_index=i, resolution=resolution
+                    chunk, pexels_api_key, used_media_ids, chunk_index=i, resolution=resolution,
+                    context=article_context, cache=search_cache, prefer_photos=prefer_photos,
                 )
                 query_log_lines.append(f"[{i}] fonte=\"{source_desc}\" ({media_type}) | trecho=\"{chunk}\"")
 

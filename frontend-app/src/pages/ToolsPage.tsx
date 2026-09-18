@@ -372,6 +372,7 @@ function TextToVideoCard() {
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
   const [subtitleStyle, setSubtitleStyle] = useState<"static" | "karaoke">("karaoke");
   const [orientation, setOrientation] = useState<"horizontal" | "vertical">("horizontal");
+  const [preferPhotos, setPreferPhotos] = useState(true);
 
   const [bumperStatus, setBumperStatus] = useState<api.BumperStatus | null>(null);
   const [useIntro, setUseIntro] = useState(true);
@@ -525,7 +526,8 @@ function TextToVideoCard() {
         bumperStatus?.has_outro ? useOutro : false,
         (bumperStatus?.webcam_clips.length ?? 0) > 0 ? useWebcam : false,
         webcamPosition,
-        subtitlesEnabled ? subtitleStyle : undefined
+        subtitlesEnabled ? subtitleStyle : undefined,
+        preferPhotos
       );
       await poll(job.id);
     } catch (err) {
@@ -636,6 +638,15 @@ function TextToVideoCard() {
             Vertical (9:16) — Reels/Shorts/TikTok
           </button>
         </div>
+      </div>
+
+      <div className="mt-3">
+        <Toggle
+          checked={preferPhotos}
+          onChange={setPreferPhotos}
+          label="Priorizar imagens (mais rápido)"
+          description="Tenta foto antes de vídeo nas buscas automáticas — baixar vídeo é bem mais lento"
+        />
       </div>
 
       <div className="mt-3">
