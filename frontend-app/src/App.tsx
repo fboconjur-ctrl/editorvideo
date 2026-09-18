@@ -1,49 +1,72 @@
 import { useState } from "react";
 import { Clapperboard, Scissors, Wrench } from "lucide-react";
-import { Tabs } from "./components/ui/Tabs";
+import { Section } from "./components/ui/Section";
 import { AutoEditorPage } from "./pages/AutoEditorPage";
 import { ManualEditorPage } from "./pages/ManualEditorPage";
 import { ToolsPage } from "./pages/ToolsPage";
 
-type TabId = "auto" | "manual" | "tools";
+type SectionId = "auto" | "manual" | "tools";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabId>("auto");
+  // Tudo fica na mesma página, sem trocar de tela — só uma seção
+  // expandida por vez, pra não precisar rolar por três editores inteiros
+  // ao mesmo tempo. O estado de cada editor continua vivo mesmo com a
+  // seção fechada (fica só escondida via CSS), então não perde nada ao
+  // alternar.
+  const [expanded, setExpanded] = useState<SectionId>("auto");
   const [bridge, setBridge] = useState<{ uploadId: string; duration: number } | null>(null);
 
   function handleEditManually(uploadId: string, duration: number) {
     setBridge({ uploadId, duration });
-    setActiveTab("manual");
+    setExpanded("manual");
+    requestAnimationFrame(() => {
+      document.getElementById("section-manual")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  function toggle(id: SectionId) {
+    setExpanded((current) => (current === id ? current : id));
   }
 
   return (
     <div className="min-h-screen bg-base-950">
       <header className="border-b border-base-800 bg-base-900/60 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <Clapperboard className="h-5 w-5 text-accent" />
-            <span className="font-semibold text-slate-100">Video Editor Local</span>
-          </div>
-          <Tabs
-            active={activeTab}
-            onChange={(id) => setActiveTab(id as TabId)}
-            tabs={[
-              { id: "auto", label: "Automático", icon: <Clapperboard className="h-4 w-4" /> },
-              { id: "manual", label: "Manual", icon: <Scissors className="h-4 w-4" /> },
-              { id: "tools", label: "Ferramentas", icon: <Wrench className="h-4 w-4" /> },
-            ]}
-          />
+        <div className="mx-auto flex max-w-6xl items-center px-6 py-4">
+          <Clapperboard className="h-5 w-5 text-accent" />
+          <span className="ml-2 font-semibold text-slate-100">Video Editor Local</span>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        <div style={{ display: activeTab === "auto" ? "block" : "none" }}>
+      <main className="mx-auto max-w-6xl space-y-4 px-6 py-8">
+        <Section
+          id="section-auto"
+          title="Automático"
+          icon={<Clapperboard className="h-4 w-4 text-accent" />}
+          expanded={expanded === "auto"}
+          onToggle={() => toggle("auto")}
+        >
           <AutoEditorPage onEditManually={handleEditManually} />
-        </div>
-        <div style={{ display: activeTab === "manual" ? "block" : "none" }}>
+        </Section>
+
+        <Section
+          id="section-manual"
+          title="Manual"
+          icon={<Scissors className="h-4 w-4 text-accent" />}
+          expanded={expanded === "manual"}
+          onToggle={() => toggle("manual")}
+        >
           <ManualEditorPage initialUploadId={bridge?.uploadId} initialDuration={bridge?.duration} />
-        </div>
-        {activeTab === "tools" && <ToolsPage />}
+        </Section>
+
+        <Section
+          id="section-tools"
+          title="Ferramentas"
+          icon={<Wrench className="h-4 w-4 text-accent" />}
+          expanded={expanded === "tools"}
+          onToggle={() => toggle("tools")}
+        >
+          <ToolsPage />
+        </Section>
       </main>
     </div>
   );
