@@ -21,7 +21,20 @@ FADE_SECONDS = 0.35
 # Trechos menores = mais cortes de imagem/vídeo no resultado final, no
 # ritmo de vídeo de notícia/redes sociais (uma mídia nova a cada poucos
 # segundos, não uma a cada frase longa).
-MAX_WORDS_PER_CHUNK = 12
+MAX_WORDS_PER_CHUNK = 8
+
+# Consultas genéricas de "notícia" pra usar como último recurso antes do
+# fundo sólido, girando entre elas por índice do trecho — evita que um
+# vídeo inteiro vire uma sequência de fundos sólidos só porque o trecho
+# não tinha nenhuma palavra-chave "buscável" (ex: conectivos, transições).
+_GENERIC_NEWS_QUERIES = [
+    "news studio broadcast",
+    "newspaper press",
+    "city skyline brazil",
+    "press conference microphone",
+    "office meeting discussion",
+    "crowd people street",
+]
 # Quantos candidatos pedir por busca — usado pra poder pular os que já
 # foram usados noutro trecho do mesmo vídeo (evita repetir mídia).
 CANDIDATES_PER_SEARCH = 12
@@ -85,12 +98,20 @@ def extract_keyphrase(chunk_text: str) -> str:
     reconhece expressões compostas como unidade ("tribunal eleitoral" e
     "tribunal militar" saem como frases distintas, não como palavras
     soltas embaralhadas)."""
+    phrases = extract_keyphrases(chunk_text)
+    return phrases[0] if phrases else chunk_text
+
+
+def extract_keyphrases(chunk_text: str) -> list[str]:
+    """Como `extract_keyphrase`, mas devolve todas as frases candidatas
+    (ordenadas da mais pra menos relevante) em vez de só a melhor — usado
+    pra tentar buscas alternativas quando a primeira frase-chave não acha
+    nenhuma mídia."""
     keywords = _yake_extractor.extract_keywords(chunk_text)
     if not keywords:
-        return chunk_text
-    # keywords vem ordenado por relevância (score menor = mais relevante)
-    best_phrase, _score = min(keywords, key=lambda kw: kw[1])
-    return best_phrase
+        return []
+    ordered = sorted(keywords, key=lambda kw: kw[1])
+    return [phrase for phrase, _score in ordered]
 
 
 def translate_to_english(text: str) -> str:
@@ -208,12 +229,26 @@ def search_pexels_video(query: str, api_key: str, used_ids: set[str]) -> bytes |
         return None
 
 
+def _try_pexels(query: str, api_key: str, used_ids: set[str]) -> tuple[str, bytes, str] | None:
+    """Tenta um vídeo e, se não achar, uma foto no Pexels pra essa query.
+    Retorna None se nenhum dos dois achar nada (query ruim ou já toda
+    usada), pra o chamador poder tentar outra query em vez de desistir."""
+    video = search_pexels_video(query, api_key, used_ids)
+    if video:
+        return "video", video, f"pexels-video:{query}"
+    photo = search_pexels_photo(query, api_key, used_ids)
+    if photo:
+        return "photo", photo, f"pexels-photo:{query}"
+    return None
+
+
 def resolve_media_for_chunk(
-    chunk_text: str, api_key: str, used_ids: set[str]
+    chunk_text: str, api_key: str, used_ids: set[str], chunk_index: int = 0
 ) -> tuple[str, bytes | None, str]:
     """Decide e busca a melhor mídia pro trecho. Retorna (tipo, bytes,
     descrição da fonte pro log de diagnóstico), onde tipo é "photo",
-    "video" ou "color" (fundo sólido, usado quando nada é encontrado).
+    "video" ou "color" (fundo sólido, usado só quando TODAS as tentativas
+    abaixo falharem).
 
     Ordem de prioridade:
     1. Frase-chave extraída parece nome de pessoa -> tenta achar ESSA
@@ -227,9 +262,18 @@ def resolve_media_for_chunk(
     3. Define a query de busca (genérica do tema, ou frase-chave
        traduzida) e tenta um VÍDEO no Pexels primeiro (mais dinâmico),
        depois uma FOTO no Pexels.
-    4. Se nada for encontrado, fundo sólido.
+    4. Se a query principal não achar nada, tenta as outras frases-chave
+       candidatas do YAKE (nem sempre a "melhor" segundo o score é a que
+       tem cobertura no banco de imagens).
+    5. Se ainda assim nada for encontrado, tenta uma query genérica de
+       "notícia" (girando entre algumas opções) em vez de ir direto pro
+       fundo sólido — um trecho sem palavra-chave específica (conectivos,
+       transições) não precisa terminar sem nenhuma imagem.
+    6. Só cai pro fundo sólido se NENHUMA busca acima trouxe resultado
+       (banco sem internet, chave inválida, ou tudo já usado no vídeo).
     """
-    keyphrase_pt = extract_keyphrase(chunk_text)
+    keyphrases_pt = extract_keyphrases(chunk_text)
+    keyphrase_pt = keyphrases_pt[0] if keyphrases_pt else chunk_text
 
     if looks_like_proper_name(keyphrase_pt):
         image = search_wikipedia_image(keyphrase_pt)
@@ -250,12 +294,27 @@ def resolve_media_for_chunk(
         query = translate_to_english(keyphrase_pt)
 
     if api_key:
-        video = search_pexels_video(query, api_key, used_ids)
-        if video:
-            return "video", video, f"pexels-video:{query}"
-        photo = search_pexels_photo(query, api_key, used_ids)
-        if photo:
-            return "photo", photo, f"pexels-photo:{query}"
+        found = _try_pexels(query, api_key, used_ids)
+        if found:
+            return found
+
+        # Primeira query não achou nada: tenta as outras frases-chave
+        # candidatas antes de desistir (traduzidas, evitando repetir a
+        # primeira query já tentada).
+        for alt_phrase in keyphrases_pt[1:3]:
+            alt_query = translate_to_english(alt_phrase)
+            if alt_query.strip().lower() == query.strip().lower():
+                continue
+            found = _try_pexels(alt_query, api_key, used_ids)
+            if found:
+                return found
+
+        # Ainda nada: usa uma query genérica de notícia em vez de fundo
+        # sólido, girando pela lista pra variar entre trechos.
+        generic_query = _GENERIC_NEWS_QUERIES[chunk_index % len(_GENERIC_NEWS_QUERIES)]
+        found = _try_pexels(generic_query, api_key, used_ids)
+        if found:
+            return found
 
     return "color", None, query
 
@@ -346,7 +405,9 @@ def generate_video_from_text(
             duration = probe_duration(audio_path)
 
             segment_path = tmp / f"segment_{i}.mp4"
-            media_type, media_bytes, source_desc = resolve_media_for_chunk(chunk, pexels_api_key, used_media_ids)
+            media_type, media_bytes, source_desc = resolve_media_for_chunk(
+                chunk, pexels_api_key, used_media_ids, chunk_index=i
+            )
             query_log_lines.append(f"[{i}] fonte=\"{source_desc}\" ({media_type}) | trecho=\"{chunk}\"")
 
             if media_type == "video" and media_bytes:
