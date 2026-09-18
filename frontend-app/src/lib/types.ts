@@ -15,6 +15,7 @@ export type JobStatus =
 export interface Job {
   id: string;
   status: JobStatus;
+  progress_detail: string | null;
   error: string | null;
   result_video: string | null;
   result_srt: string | null;

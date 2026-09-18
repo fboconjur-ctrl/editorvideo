@@ -68,6 +68,7 @@ JobStatus = Literal[
 class Job(BaseModel):
     id: str
     status: JobStatus = "queued"
+    progress_detail: str | None = None
     error: str | None = None
     result_video: str | None = None
     result_srt: str | None = None
@@ -131,9 +132,16 @@ def _run_pipeline(
             job.status = "removing_background"
             bg_output_ext = "mp4" if background_color else "webm"
             bg_video = job_dir / f"no_bg.{bg_output_ext}"
+
+            def _on_bg_progress(done: int, total: int) -> None:
+                job.progress_detail = f"frame {done}/{total}"
+
             remove_background(
-                current_video, bg_video, job_dir / "bg_tmp", background_color=background_color or None
+                current_video, bg_video, job_dir / "bg_tmp",
+                background_color=background_color or None,
+                progress_callback=_on_bg_progress,
             )
+            job.progress_detail = None
             current_video = bg_video
 
         if upscale_enabled:

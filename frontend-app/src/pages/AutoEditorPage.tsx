@@ -202,6 +202,9 @@ export function AutoEditorPage({ onEditManually }: { onEditManually: (uploadId: 
         {(processing || Object.keys(stepStates).length > 0) && (
           <div className="mt-5 rounded-xl border border-base-700 bg-base-900 p-4">
             <ProgressSteps steps={activeSteps} states={stepStates} />
+            {job?.progress_detail && (
+              <p className="mt-3 text-sm text-base-400">{job.progress_detail}</p>
+            )}
             {errorMessage && <p className="mt-3 text-sm text-red-400">{errorMessage}</p>}
           </div>
         )}

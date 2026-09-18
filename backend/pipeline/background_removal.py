@@ -1,9 +1,12 @@
 """Remoção de fundo de vídeo usando rembg (modelo open-source, roda 100%
 local/offline após o primeiro download do modelo — sem chamadas pagas)."""
 import json
+import os
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Callable
 
 from rembg import new_session, remove
 
@@ -37,12 +40,17 @@ def remove_background(
     output_path: Path,
     tmp_dir: Path,
     background_color: str | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> None:
     """Remove o fundo do vídeo, frame a frame.
 
     - `background_color=None`: gera um `.webm` com canal alpha (fundo transparente).
     - `background_color="green"` (ou qualquer cor ffmpeg): compõe a pessoa
       sobre um fundo sólido dessa cor.
+    - `progress_callback(frames_done, frames_total)`: chamado a cada frame
+      processado. Sem isso a etapa fica minutos sem nenhum feedback (o
+      modelo processa frame a frame na CPU), o que parece um travamento
+      mesmo quando está funcionando normalmente.
     """
     frames_dir = tmp_dir / "frames"
     processed_dir = tmp_dir / "processed"
@@ -57,9 +65,24 @@ def remove_background(
     )
 
     session = _get_session()
-    for frame_path in sorted(frames_dir.glob("frame_*.png")):
+    frame_paths = sorted(frames_dir.glob("frame_*.png"))
+    total = len(frame_paths)
+
+    def _process_frame(frame_path: Path) -> None:
         result = remove(frame_path.read_bytes(), session=session)
         (processed_dir / frame_path.name).write_bytes(result)
+
+    # A inferência do onnxruntime libera o GIL, então processar vários
+    # frames em paralelo com threads dá um ganho real de velocidade (não é
+    # só um paralelismo aparente), sem precisar reescrever pra
+    # multiprocessing nem duplicar o modelo carregado na memória.
+    max_workers = min(4, os.cpu_count() or 1)
+    done = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for _ in executor.map(_process_frame, frame_paths):
+            done += 1
+            if progress_callback:
+                progress_callback(done, total)
 
     if background_color:
         cmd = [
