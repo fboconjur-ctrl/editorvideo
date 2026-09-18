@@ -49,17 +49,48 @@ def synthesize_speech_local(
 # o seletor da interface.
 _EDGE_LANG_PREFIXES = ("pt-BR", "pt-PT", "en-US", "en-GB", "es-ES", "es-MX")
 
+# Lista fixa de reserva: usada quando a busca online da lista completa
+# falha (rede lenta/instável, proxy bloqueando esse endpoint específico da
+# Microsoft) — sem isso, o seletor de voz na interface fica só com
+# "Padrão" e o usuário nunca descobre que existem outras vozes neurais
+# além da default. IDs de voz do edge-tts são estáveis (não mudam), então
+# essa lista funciona mesmo sem internet pra listar — só precisa de
+# internet na hora de sintetizar.
+_EDGE_FALLBACK_VOICES: list[VoiceInfo] = [
+    VoiceInfo(id="pt-BR-FranciscaNeural", name="Francisca (feminina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-AntonioNeural", name="Antônio (masculina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-ThalitaNeural", name="Thalita (feminina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-BrendaNeural", name="Brenda (feminina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-DonatoNeural", name="Donato (masculina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-ElzaNeural", name="Elza (feminina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-FabioNeural", name="Fábio (masculina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-GiovannaNeural", name="Giovanna (feminina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-HumbertoNeural", name="Humberto (masculina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-JulioNeural", name="Júlio (masculina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-LeilaNeural", name="Leila (feminina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-ManuelaNeural", name="Manuela (feminina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-NicolauNeural", name="Nicolau (masculina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-ValerioNeural", name="Valério (masculina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-BR-YaraNeural", name="Yara (feminina)", languages=["pt-BR"]),
+    VoiceInfo(id="pt-PT-RaquelNeural", name="Raquel (feminina, Portugal)", languages=["pt-PT"]),
+    VoiceInfo(id="pt-PT-DuarteNeural", name="Duarte (masculina, Portugal)", languages=["pt-PT"]),
+]
+
 
 def list_edge_voices() -> list[VoiceInfo]:
     async def _fetch():
         return await edge_tts.list_voices()
 
-    all_voices = asyncio.run(_fetch())
+    try:
+        all_voices = asyncio.run(_fetch())
+    except Exception:  # noqa: BLE001 - qualquer falha de rede cai pra lista fixa
+        return _EDGE_FALLBACK_VOICES
+
     result = []
     for v in all_voices:
         if v["Locale"].startswith(_EDGE_LANG_PREFIXES):
             result.append(VoiceInfo(id=v["ShortName"], name=f"{v['FriendlyName']}", languages=[v["Locale"]]))
-    return result
+    return result or _EDGE_FALLBACK_VOICES
 
 
 def synthesize_speech_edge(text: str, output_path: Path, voice_id: str | None = None, rate: int | None = None) -> None:
