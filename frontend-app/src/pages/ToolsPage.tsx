@@ -359,6 +359,7 @@ function TextToVideoCard() {
   const [hasPexelsKey, setHasPexelsKey] = useState<boolean | null>(null);
   const [pexelsKeyInput, setPexelsKeyInput] = useState("");
   const [savingKey, setSavingKey] = useState(false);
+  const [manualImages, setManualImages] = useState<File[]>([]);
 
   useEffect(() => {
     api
@@ -386,9 +387,15 @@ function TextToVideoCard() {
     setBusy(true);
     setVideoUrl(null);
     setLogUrl(null);
-    setStatus("Gerando narração e buscando imagens (pode demorar alguns minutos)...");
+    setStatus(
+      manualImages.length > 0
+        ? "Gerando narração e montando o vídeo com suas imagens (pode demorar alguns minutos)..."
+        : "Gerando narração e buscando imagens (pode demorar alguns minutos)..."
+    );
     try {
-      const job = await api.createTextToVideo(text, selection.engine, Number(rate) || 0, selection.voiceId || undefined);
+      const job = await api.createTextToVideo(
+        text, selection.engine, Number(rate) || 0, selection.voiceId || undefined, manualImages
+      );
       await poll(job.id);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err));
@@ -426,7 +433,7 @@ function TextToVideoCard() {
         Divide o texto em trechos, narra cada um e busca uma foto relacionada no banco gratuito Pexels para cada trecho.
       </CardSubtitle>
 
-      {hasPexelsKey === false && (
+      {hasPexelsKey === false && manualImages.length === 0 && (
         <div className="mt-4 rounded-lg border border-amber-700/40 bg-amber-500/10 p-3">
           <div className="flex items-center gap-2 text-sm font-medium text-amber-300">
             <KeyRound className="h-4 w-4" /> Chave da API do Pexels necessária
@@ -467,6 +474,29 @@ function TextToVideoCard() {
           <label className="text-xs text-slate-400">Velocidade</label>
           <input className="input-field mt-1" placeholder="em branco = padrão" value={rate} onChange={(e) => setRate(e.target.value)} />
         </div>
+      </div>
+
+      <div className="mt-3 rounded-lg border border-base-700 bg-base-900 p-3">
+        <label className="text-xs font-medium text-slate-300">
+          Usar minhas próprias imagens (opcional)
+        </label>
+        <p className="mt-1 text-xs text-slate-500">
+          As fotos buscadas automaticamente às vezes ficam artificiais/genéricas demais. Se preferir,
+          suba aqui as imagens que quer usar — elas são distribuídas em ordem pelos trechos do texto
+          (repetindo em ciclo se houver menos imagens do que trechos), em vez de buscar no Pexels/Wikipedia.
+        </p>
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          className="input-field mt-2"
+          onChange={(e) => setManualImages(Array.from(e.target.files ?? []))}
+        />
+        {manualImages.length > 0 && (
+          <p className="mt-1 text-xs text-emerald-400">
+            {manualImages.length} imagem(ns) selecionada(s) — a busca automática será ignorada.
+          </p>
+        )}
       </div>
 
       <Button className="mt-4" onClick={handleGenerate} disabled={!text.trim() || busy}>

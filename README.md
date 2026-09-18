@@ -182,6 +182,12 @@ idealmente rodar em GPU.
   Nenhuma foto/vídeo do Pexels se repete dentro do mesmo vídeo gerado —
   cada busca pula os resultados já usados noutro trecho.
 
+  **Usar suas próprias imagens**: se a busca automática trouxer fotos
+  artificiais/genéricas demais pro tema, dá pra subir suas próprias
+  imagens em vez de depender da busca — elas são distribuídas em ordem
+  pelos trechos do texto (repetindo em ciclo se houver menos imagens do
+  que trechos), sem chamar Pexels/Wikipedia nesse caso.
+
   Depois de gerar, um botão "Ver buscas de imagem usadas" mostra
   exatamente qual busca/fonte foi usada em cada trecho, pra facilitar
   ajustar se alguma mídia vier estranha.

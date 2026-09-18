@@ -622,7 +622,14 @@ class TextToVideoJob(BaseModel):
 TEXT_TO_VIDEO_JOBS: dict[str, TextToVideoJob] = {}
 
 
-def _run_text_to_video(job_id: str, text: str, engine: str, voice_id: str | None, rate: int | None) -> None:
+def _run_text_to_video(
+    job_id: str,
+    text: str,
+    engine: str,
+    voice_id: str | None,
+    rate: int | None,
+    manual_image_paths: list[Path] | None,
+) -> None:
     job = TEXT_TO_VIDEO_JOBS[job_id]
     try:
         job.status = "generating"
@@ -631,7 +638,10 @@ def _run_text_to_video(job_id: str, text: str, engine: str, voice_id: str | None
         output_path = job_dir / "video.mp4"
 
         api_key = get_pexels_api_key() or ""
-        generate_video_from_text(text, output_path, api_key, tts_engine=engine, voice_id=voice_id, rate=rate)
+        generate_video_from_text(
+            text, output_path, api_key, tts_engine=engine, voice_id=voice_id, rate=rate,
+            manual_image_paths=manual_image_paths,
+        )
 
         log_path = job_dir / "buscas_de_imagem.log.txt"
         job.result_video = str(output_path)
@@ -649,11 +659,27 @@ async def create_text_to_video(
     engine: str = Form("edge"),
     voice_id: str = Form(""),
     rate: int = Form(0),
+    manual_images: list[UploadFile] = File(default=[]),
 ) -> TextToVideoJob:
     job_id = str(uuid.uuid4())
+
+    manual_image_paths: list[Path] | None = None
+    if manual_images and manual_images[0].filename:
+        images_dir = UPLOADS_DIR / job_id / "manual_images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        manual_image_paths = []
+        for idx, upload in enumerate(manual_images):
+            suffix = Path(upload.filename or "").suffix or ".jpg"
+            image_path = images_dir / f"img_{idx:03d}{suffix}"
+            with image_path.open("wb") as f:
+                shutil.copyfileobj(upload.file, f)
+            manual_image_paths.append(image_path)
+
     job = TextToVideoJob(id=job_id)
     TEXT_TO_VIDEO_JOBS[job_id] = job
-    background_tasks.add_task(_run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None)
+    background_tasks.add_task(
+        _run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None, manual_image_paths,
+    )
     return job
 
 

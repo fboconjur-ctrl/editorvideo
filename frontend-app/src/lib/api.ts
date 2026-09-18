@@ -154,13 +154,17 @@ export function createTextToVideo(
   text: string,
   engine: TtsEngine,
   rate: number,
-  voiceId?: string
+  voiceId?: string,
+  manualImages?: File[]
 ): Promise<TextToVideoJob> {
   const formData = new FormData();
   formData.append("text", text);
   formData.append("engine", engine);
   formData.append("rate", String(rate));
   if (voiceId) formData.append("voice_id", voiceId);
+  for (const image of manualImages ?? []) {
+    formData.append("manual_images", image);
+  }
   return request<TextToVideoJob>("/api/text-to-video", { method: "POST", body: formData });
 }
 
