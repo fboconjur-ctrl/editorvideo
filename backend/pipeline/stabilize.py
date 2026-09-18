@@ -27,21 +27,30 @@ def _run(cmd: list[str]) -> None:
         raise RuntimeError(f"Falha ao estabilizar o vídeo: {stderr[-1500:]}") from exc
 
 
+def _escape_filter_path(path: Path) -> str:
+    """Caminhos usados DENTRO de uma string de filtro do ffmpeg (não como
+    argumento solto) precisam escapar ':' e usar barras normais — no
+    Windows um caminho tipo "C:\\Users\\..." quebra o parser de filtros do
+    ffmpeg, porque ele usa ':' pra separar as opções do filtro."""
+    return str(path).replace("\\", "/").replace(":", "\\:")
+
+
 def stabilize(input_path: Path, output_path: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         transforms_file = Path(tmp) / "transforms.trf"
+        transforms_escaped = _escape_filter_path(transforms_file)
 
         _run([
             "ffmpeg", "-y",
             "-i", str(input_path),
-            "-vf", f"vidstabdetect=shakiness=5:accuracy=15:result={transforms_file}",
+            "-vf", f"vidstabdetect=shakiness=5:accuracy=15:result={transforms_escaped}",
             "-f", "null", "-",
         ])
 
         _run([
             "ffmpeg", "-y",
             "-i", str(input_path),
-            "-vf", f"vidstabtransform=input={transforms_file}:zoom=0:smoothing=15,unsharp=5:5:0.8:3:3:0.4",
+            "-vf", f"vidstabtransform=input={transforms_escaped}:zoom=0:smoothing=15,unsharp=5:5:0.8:3:3:0.4",
             "-c:a", "copy",
             str(output_path),
         ])
