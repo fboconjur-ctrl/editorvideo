@@ -43,14 +43,14 @@ def stabilize(input_path: Path, output_path: Path) -> None:
         _run([
             "ffmpeg", "-y",
             "-i", str(input_path),
-            "-vf", f"vidstabdetect=shakiness=5:accuracy=15:result={transforms_escaped}",
+            "-vf", f"vidstabdetect=shakiness=5:accuracy=15:result='{transforms_escaped}'",
             "-f", "null", "-",
         ])
 
         _run([
             "ffmpeg", "-y",
             "-i", str(input_path),
-            "-vf", f"vidstabtransform=input={transforms_escaped}:zoom=0:smoothing=15,unsharp=5:5:0.8:3:3:0.4",
+            "-vf", f"vidstabtransform=input='{transforms_escaped}':zoom=0:smoothing=15,unsharp=5:5:0.8:3:3:0.4",
             "-c:a", "copy",
             str(output_path),
         ])
