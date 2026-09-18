@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 import requests
+from deep_translator import GoogleTranslator
 
 from .ffprobe_utils import probe_duration
 from .tts import synthesize_speech
@@ -15,6 +16,46 @@ from .tts import synthesize_speech
 RESOLUTION = (1920, 1080)
 FPS = 25
 MAX_WORDS_PER_CHUNK = 22
+MAX_KEYWORDS = 5
+
+# Palavras muito comuns em português que não ajudam a achar uma foto
+# relevante — removidas antes de montar a busca no Pexels.
+_STOPWORDS_PT = {
+    "a", "o", "as", "os", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das",
+    "em", "no", "na", "nos", "nas", "por", "para", "com", "sem", "sobre", "entre",
+    "e", "ou", "mas", "que", "se", "ao", "aos", "à", "às", "é", "foi", "ser", "são",
+    "está", "estão", "isso", "esse", "essa", "este", "esta", "isto", "como", "quando",
+    "onde", "muito", "muita", "muitos", "muitas", "mais", "menos", "já", "não", "sim",
+    "também", "só", "apenas", "assim", "então", "pois", "porque", "seu", "sua", "seus",
+    "suas", "meu", "minha", "nosso", "nossa", "eu", "tu", "ele", "ela", "nós", "vós",
+    "eles", "elas", "lhe", "lhes", "me", "te", "nos", "vos", "há", "vai", "vou",
+}
+
+
+def extract_keywords(text: str, max_keywords: int = MAX_KEYWORDS) -> str:
+    """Tira pontuação/stopwords e fica só com as palavras mais prováveis de
+    render uma busca de imagem melhor do que a frase inteira crua.
+
+    Prioriza palavras mais longas: verbos comuns e advérbios curtos
+    ("quero", "hoje") tendem a ser menos visuais/específicos do que
+    substantivos mais longos ("cachorros", "parque")."""
+    words = re.findall(r"[A-Za-zÀ-ÿ]+", text.lower())
+    keywords = [w for w in words if len(w) > 3 and w not in _STOPWORDS_PT]
+    if not keywords:
+        keywords = words
+    keywords = sorted(set(keywords), key=len, reverse=True)
+    return " ".join(keywords[:max_keywords])
+
+
+def translate_to_english(text: str) -> str:
+    """O catálogo/índice do Pexels responde muito melhor a termos em
+    inglês. Traduz antes de buscar; se a tradução falhar (ex: sem
+    internet no momento), usa o texto original em português como fallback."""
+    try:
+        translated = GoogleTranslator(source="pt", target="en").translate(text)
+        return translated or text
+    except Exception:  # noqa: BLE001 - tradução é best-effort
+        return text
 
 
 def split_into_chunks(text: str, max_words: int = MAX_WORDS_PER_CHUNK) -> list[str]:
@@ -37,7 +78,9 @@ def split_into_chunks(text: str, max_words: int = MAX_WORDS_PER_CHUNK) -> list[s
     return chunks
 
 
-def search_pexels_image(query: str, api_key: str) -> bytes | None:
+def search_pexels_image(chunk_text: str, api_key: str) -> bytes | None:
+    keywords_pt = extract_keywords(chunk_text)
+    query = translate_to_english(keywords_pt) if keywords_pt else chunk_text
     try:
         resp = requests.get(
             "https://api.pexels.com/v1/search",
