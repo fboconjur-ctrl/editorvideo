@@ -163,7 +163,8 @@ export function createTextToVideo(
   voiceId?: string,
   manualImages?: File[],
   chunkAssignments?: (number | null)[],
-  subtitlesEnabled?: boolean
+  subtitlesEnabled?: boolean,
+  orientation?: "horizontal" | "vertical"
 ): Promise<TextToVideoJob> {
   const formData = new FormData();
   formData.append("text", text);
@@ -179,6 +180,7 @@ export function createTextToVideo(
   if (subtitlesEnabled) {
     formData.append("subtitles_enabled", "true");
   }
+  formData.append("orientation", orientation ?? "horizontal");
   return request<TextToVideoJob>("/api/text-to-video", { method: "POST", body: formData });
 }
 

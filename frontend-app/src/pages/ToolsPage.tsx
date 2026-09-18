@@ -366,6 +366,7 @@ function TextToVideoCard() {
   const [assignments, setAssignments] = useState<(number | null)[]>([]);
   const [loadingChunks, setLoadingChunks] = useState(false);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
+  const [orientation, setOrientation] = useState<"horizontal" | "vertical">("horizontal");
 
   useEffect(() => {
     api
@@ -446,7 +447,8 @@ function TextToVideoCard() {
         selection.voiceId || undefined,
         manualImages,
         chunks ? assignments : undefined,
-        subtitlesEnabled
+        subtitlesEnabled,
+        orientation
       );
       await poll(job.id);
     } catch (err) {
@@ -525,6 +527,34 @@ function TextToVideoCard() {
         <div>
           <label className="text-xs text-slate-400">Velocidade</label>
           <input className="input-field mt-1" placeholder="em branco = padrão" value={rate} onChange={(e) => setRate(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <label className="text-xs text-slate-400">Formato do vídeo</label>
+        <div className="mt-1 flex gap-2">
+          <button
+            type="button"
+            className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition ${
+              orientation === "horizontal"
+                ? "border-accent bg-accent/10 text-accent"
+                : "border-base-700 text-slate-400 hover:border-base-600"
+            }`}
+            onClick={() => setOrientation("horizontal")}
+          >
+            Horizontal (16:9) — YouTube
+          </button>
+          <button
+            type="button"
+            className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition ${
+              orientation === "vertical"
+                ? "border-accent bg-accent/10 text-accent"
+                : "border-base-700 text-slate-400 hover:border-base-600"
+            }`}
+            onClick={() => setOrientation("vertical")}
+          >
+            Vertical (9:16) — Reels/Shorts/TikTok
+          </button>
         </div>
       </div>
 

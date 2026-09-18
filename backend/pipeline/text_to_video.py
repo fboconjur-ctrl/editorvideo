@@ -17,7 +17,8 @@ from .subtitles import burn_subtitles, write_srt
 from .transcribe import Segment
 from .tts import synthesize_speech
 
-RESOLUTION = (1920, 1080)
+HORIZONTAL_RESOLUTION = (1920, 1080)
+VERTICAL_RESOLUTION = (1080, 1920)
 FPS = 25
 FADE_SECONDS = 0.35
 # Trechos menores = mais cortes de imagem/vídeo no resultado final, no
@@ -178,14 +179,20 @@ def search_wikipedia_image(title: str) -> bytes | None:
         return None
 
 
-def search_pexels_photo(query: str, api_key: str, used_ids: set[str]) -> bytes | None:
+def search_pexels_photo(
+    query: str, api_key: str, used_ids: set[str], orientation: str = "landscape"
+) -> bytes | None:
     """Busca uma foto no Pexels, pulando qualquer resultado já usado
-    noutro trecho do mesmo vídeo (evita repetir a mesma imagem)."""
+    noutro trecho do mesmo vídeo (evita repetir a mesma imagem).
+    `orientation`: "landscape" (vídeo horizontal) ou "portrait" (vertical)
+    — pede direto ao Pexels resultados nesse formato, em vez de cortar
+    depois uma foto horizontal pra caber num vídeo vertical (ou vice
+    versa), o que geralmente perde o enquadramento."""
     try:
         resp = requests.get(
             "https://api.pexels.com/v1/search",
             headers={"Authorization": api_key},
-            params={"query": query[:80], "per_page": CANDIDATES_PER_SEARCH, "orientation": "landscape"},
+            params={"query": query[:80], "per_page": CANDIDATES_PER_SEARCH, "orientation": orientation},
             timeout=15,
         )
         resp.raise_for_status()
@@ -202,15 +209,19 @@ def search_pexels_photo(query: str, api_key: str, used_ids: set[str]) -> bytes |
         return None
 
 
-def search_pexels_video(query: str, api_key: str, used_ids: set[str]) -> bytes | None:
+def search_pexels_video(
+    query: str, api_key: str, used_ids: set[str], orientation: str = "landscape", target_width: int = 1920
+) -> bytes | None:
     """Busca um vídeo curto no Pexels (b-roll real, com movimento) — mais
     dinâmico e profissional do que zoom numa foto parada. Pula vídeos já
-    usados noutro trecho."""
+    usados noutro trecho. `orientation`/`target_width`: mesmo motivo do
+    `search_pexels_photo` — pede o formato certo (horizontal/vertical) em
+    vez de espremer depois."""
     try:
         resp = requests.get(
             "https://api.pexels.com/videos/search",
             headers={"Authorization": api_key},
-            params={"query": query[:80], "per_page": CANDIDATES_PER_SEARCH, "orientation": "landscape"},
+            params={"query": query[:80], "per_page": CANDIDATES_PER_SEARCH, "orientation": orientation},
             timeout=15,
         )
         resp.raise_for_status()
@@ -221,7 +232,7 @@ def search_pexels_video(query: str, api_key: str, used_ids: set[str]) -> bytes |
             files = [f for f in video.get("video_files", []) if f.get("width") and f.get("link")]
             if not files:
                 continue
-            files.sort(key=lambda f: abs(f["width"] - RESOLUTION[0]))
+            files.sort(key=lambda f: abs(f["width"] - target_width))
             video_resp = requests.get(files[0]["link"], timeout=30)
             video_resp.raise_for_status()
             used_ids.add(media_id)
@@ -231,21 +242,27 @@ def search_pexels_video(query: str, api_key: str, used_ids: set[str]) -> bytes |
         return None
 
 
-def _try_pexels(query: str, api_key: str, used_ids: set[str]) -> tuple[str, bytes, str] | None:
+def _try_pexels(
+    query: str, api_key: str, used_ids: set[str], orientation: str, target_width: int
+) -> tuple[str, bytes, str] | None:
     """Tenta um vídeo e, se não achar, uma foto no Pexels pra essa query.
     Retorna None se nenhum dos dois achar nada (query ruim ou já toda
     usada), pra o chamador poder tentar outra query em vez de desistir."""
-    video = search_pexels_video(query, api_key, used_ids)
+    video = search_pexels_video(query, api_key, used_ids, orientation=orientation, target_width=target_width)
     if video:
         return "video", video, f"pexels-video:{query}"
-    photo = search_pexels_photo(query, api_key, used_ids)
+    photo = search_pexels_photo(query, api_key, used_ids, orientation=orientation)
     if photo:
         return "photo", photo, f"pexels-photo:{query}"
     return None
 
 
 def resolve_media_for_chunk(
-    chunk_text: str, api_key: str, used_ids: set[str], chunk_index: int = 0
+    chunk_text: str,
+    api_key: str,
+    used_ids: set[str],
+    chunk_index: int = 0,
+    resolution: tuple[int, int] = HORIZONTAL_RESOLUTION,
 ) -> tuple[str, bytes | None, str]:
     """Decide e busca a melhor mídia pro trecho. Retorna (tipo, bytes,
     descrição da fonte pro log de diagnóstico), onde tipo é "photo",
@@ -296,7 +313,10 @@ def resolve_media_for_chunk(
         query = translate_to_english(keyphrase_pt)
 
     if api_key:
-        found = _try_pexels(query, api_key, used_ids)
+        width, height = resolution
+        orientation = "portrait" if height > width else "landscape"
+
+        found = _try_pexels(query, api_key, used_ids, orientation, width)
         if found:
             return found
 
@@ -307,14 +327,14 @@ def resolve_media_for_chunk(
             alt_query = translate_to_english(alt_phrase)
             if alt_query.strip().lower() == query.strip().lower():
                 continue
-            found = _try_pexels(alt_query, api_key, used_ids)
+            found = _try_pexels(alt_query, api_key, used_ids, orientation, width)
             if found:
                 return found
 
         # Ainda nada: usa uma query genérica de notícia em vez de fundo
         # sólido, girando pela lista pra variar entre trechos.
         generic_query = _GENERIC_NEWS_QUERIES[chunk_index % len(_GENERIC_NEWS_QUERIES)]
-        found = _try_pexels(generic_query, api_key, used_ids)
+        found = _try_pexels(generic_query, api_key, used_ids, orientation, width)
         if found:
             return found
 
@@ -327,8 +347,11 @@ def _fade_filter(duration: float) -> str:
     return f"fade=t=in:st=0:d={fade:.3f},fade=t=out:st={fade_out_start:.3f}:d={fade:.3f}"
 
 
-def _build_segment_from_image(image_path: Path, audio_path: Path, duration: float, output_path: Path) -> None:
-    w, h = RESOLUTION
+def _build_segment_from_image(
+    image_path: Path, audio_path: Path, duration: float, output_path: Path,
+    resolution: tuple[int, int] = HORIZONTAL_RESOLUTION,
+) -> None:
+    w, h = resolution
     vf = (
         f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
         f"zoompan=z='min(zoom+0.0008,1.08)':d={int(duration * FPS)}:s={w}x{h}:fps={FPS},"
@@ -348,8 +371,11 @@ def _build_segment_from_image(image_path: Path, audio_path: Path, duration: floa
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
-def _build_segment_from_video(video_path: Path, audio_path: Path, duration: float, output_path: Path) -> None:
-    w, h = RESOLUTION
+def _build_segment_from_video(
+    video_path: Path, audio_path: Path, duration: float, output_path: Path,
+    resolution: tuple[int, int] = HORIZONTAL_RESOLUTION,
+) -> None:
+    w, h = resolution
     vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},{_fade_filter(duration)}"
     cmd = [
         "ffmpeg", "-y",
@@ -365,10 +391,13 @@ def _build_segment_from_video(video_path: Path, audio_path: Path, duration: floa
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
-def _build_segment_solid_color(audio_path: Path, duration: float, output_path: Path) -> None:
+def _build_segment_solid_color(
+    audio_path: Path, duration: float, output_path: Path,
+    resolution: tuple[int, int] = HORIZONTAL_RESOLUTION,
+) -> None:
     """Usado quando nenhuma mídia relacionada foi encontrada — fundo
     sólido em vez de travar a geração do vídeo."""
-    w, h = RESOLUTION
+    w, h = resolution
     cmd = [
         "ffmpeg", "-y",
         "-f", "lavfi", "-i", f"color=c=0x1d1f27:s={w}x{h}:d={duration:.3f}",
@@ -393,6 +422,7 @@ def generate_video_from_text(
     subtitles_enabled: bool = False,
     subtitle_font_size: int | None = None,
     subtitle_position: str = "bottom",
+    orientation: str = "horizontal",
 ) -> None:
     """`manual_image_map`: mapa opcional {índice do trecho: caminho da
     imagem} para os trechos onde o usuário escolheu manualmente uma foto
@@ -403,10 +433,16 @@ def generate_video_from_text(
 
     `subtitles_enabled`: queima o próprio texto da narração como legenda,
     sincronizado com a duração real de cada trecho narrado — não precisa
-    transcrever de novo (já sabemos exatamente o texto de cada trecho)."""
+    transcrever de novo (já sabemos exatamente o texto de cada trecho).
+
+    `orientation`: "horizontal" (1920x1080, YouTube/paisagem) ou
+    "vertical" (1080x1920, Reels/Shorts/TikTok) — também usado pra pedir
+    fotos/vídeos já no formato certo ao Pexels."""
     chunks = split_into_chunks(text)
     if not chunks:
         raise ValueError("Texto vazio.")
+
+    resolution = VERTICAL_RESOLUTION if orientation == "vertical" else HORIZONTAL_RESOLUTION
 
     manual_image_map = manual_image_map or {}
     query_log_lines = []
@@ -432,20 +468,20 @@ def generate_video_from_text(
                 media_type, media_bytes, source_desc = "photo", manual_path.read_bytes(), f"manual:{manual_path.name}"
             else:
                 media_type, media_bytes, source_desc = resolve_media_for_chunk(
-                    chunk, pexels_api_key, used_media_ids, chunk_index=i
+                    chunk, pexels_api_key, used_media_ids, chunk_index=i, resolution=resolution
                 )
             query_log_lines.append(f"[{i}] fonte=\"{source_desc}\" ({media_type}) | trecho=\"{chunk}\"")
 
             if media_type == "video" and media_bytes:
                 video_path = tmp / f"media_{i}.mp4"
                 video_path.write_bytes(media_bytes)
-                _build_segment_from_video(video_path, audio_path, duration, segment_path)
+                _build_segment_from_video(video_path, audio_path, duration, segment_path, resolution=resolution)
             elif media_type == "photo" and media_bytes:
                 image_path = tmp / f"media_{i}.jpg"
                 image_path.write_bytes(media_bytes)
-                _build_segment_from_image(image_path, audio_path, duration, segment_path)
+                _build_segment_from_image(image_path, audio_path, duration, segment_path, resolution=resolution)
             else:
-                _build_segment_solid_color(audio_path, duration, segment_path)
+                _build_segment_solid_color(audio_path, duration, segment_path, resolution=resolution)
 
             segment_paths.append(segment_path)
 

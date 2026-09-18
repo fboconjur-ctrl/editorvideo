@@ -641,6 +641,7 @@ def _run_text_to_video(
     subtitles_enabled: bool,
     subtitle_font_size: int | None,
     subtitle_position: str,
+    orientation: str,
 ) -> None:
     job = TEXT_TO_VIDEO_JOBS[job_id]
     try:
@@ -656,6 +657,7 @@ def _run_text_to_video(
             subtitles_enabled=subtitles_enabled,
             subtitle_font_size=subtitle_font_size,
             subtitle_position=subtitle_position,
+            orientation=orientation,
         )
 
         log_path = job_dir / "buscas_de_imagem.log.txt"
@@ -679,6 +681,7 @@ async def create_text_to_video(
     subtitles_enabled: bool = Form(False),
     subtitle_font_size: int = Form(0),
     subtitle_position: str = Form("bottom"),
+    orientation: str = Form("horizontal"),
 ) -> TextToVideoJob:
     """`chunk_assignments`: JSON com uma lista do mesmo tamanho dos trechos
     do texto, onde cada item é o índice (dentro de `manual_images`) da
@@ -711,7 +714,7 @@ async def create_text_to_video(
     TEXT_TO_VIDEO_JOBS[job_id] = job
     background_tasks.add_task(
         _run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None, manual_image_map,
-        subtitles_enabled, subtitle_font_size or None, subtitle_position,
+        subtitles_enabled, subtitle_font_size or None, subtitle_position, orientation,
     )
     return job
 
