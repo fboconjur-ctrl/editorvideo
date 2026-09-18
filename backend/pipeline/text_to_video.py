@@ -411,6 +411,27 @@ def _build_segment_solid_color(
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+def build_cover_thumbnail(
+    image_path: Path, output_path: Path, resolution: tuple[int, int] = HORIZONTAL_RESOLUTION
+) -> None:
+    """Gera a imagem de capa do vídeo a partir da foto escolhida pelo
+    usuário, ajustada pro tamanho/proporção do vídeo (letterbox, sem
+    cortar nada da foto original — diferente dos segmentos do vídeo, aqui
+    o usuário escolheu essa imagem de propósito pra representar o vídeo
+    todo, então não faz sentido cortar pedaços dela)."""
+    w, h = resolution
+    vf = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x1d1f27"
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(image_path),
+        "-vf", vf,
+        "-frames:v", "1",
+        "-update", "1",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
 def generate_video_from_text(
     text: str,
     output_path: Path,

@@ -355,6 +355,10 @@ function TextToVideoCard() {
   const [busy, setBusy] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [logUrl, setLogUrl] = useState<string | null>(null);
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+
+  const [coverImage, setCoverImage] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
 
   const [hasPexelsKey, setHasPexelsKey] = useState<boolean | null>(null);
   const [pexelsKeyInput, setPexelsKeyInput] = useState("");
@@ -383,6 +387,16 @@ function TextToVideoCard() {
     setImagePreviews(urls);
     return () => urls.forEach((u) => URL.revokeObjectURL(u));
   }, [manualImages]);
+
+  useEffect(() => {
+    if (!coverImage) {
+      setCoverPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(coverImage);
+    setCoverPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [coverImage]);
 
   function handleTextChange(value: string) {
     setText(value);
@@ -433,6 +447,7 @@ function TextToVideoCard() {
     setBusy(true);
     setVideoUrl(null);
     setLogUrl(null);
+    setThumbnailUrl(null);
     const hasManualAssignment = assignments.some((a) => a !== null);
     setStatus(
       hasManualAssignment
@@ -448,7 +463,8 @@ function TextToVideoCard() {
         manualImages,
         chunks ? assignments : undefined,
         subtitlesEnabled,
-        orientation
+        orientation,
+        coverImage
       );
       await poll(job.id);
     } catch (err) {
@@ -465,6 +481,9 @@ function TextToVideoCard() {
         setStatus("Vídeo gerado!");
         setVideoUrl(api.textToVideoUrl(jobId));
         setLogUrl(api.textToVideoLogUrl(jobId));
+        if (job.result_thumbnail) {
+          setThumbnailUrl(api.textToVideoThumbnailUrl(jobId));
+        }
         setBusy(false);
         return;
       }
@@ -558,6 +577,25 @@ function TextToVideoCard() {
         </div>
       </div>
 
+      <div className="mt-3">
+        <label className="text-xs text-slate-400">Imagem de capa (opcional)</label>
+        <p className="mt-1 text-xs text-slate-500">
+          Escolha uma foto pra representar o vídeo (ex: pra usar como thumbnail ao postar em
+          outro lugar). Ela não entra nos trechos narrados, só gera um arquivo de capa separado.
+        </p>
+        <div className="mt-2 flex items-center gap-3">
+          <input
+            type="file"
+            accept="image/*"
+            className="input-field !mt-0 flex-1"
+            onChange={(e) => setCoverImage(e.target.files?.[0] ?? null)}
+          />
+          {coverPreview && (
+            <img src={coverPreview} alt="Capa" className="h-12 w-12 shrink-0 rounded object-cover" />
+          )}
+        </div>
+      </div>
+
       <div className="mt-3 rounded-lg border border-base-700 bg-base-900 p-3">
         <label className="text-xs font-medium text-slate-300">
           Usar minhas próprias imagens (opcional)
@@ -638,11 +676,21 @@ function TextToVideoCard() {
 
       {videoUrl && (
         <div className="mt-3 space-y-2">
-          <video src={videoUrl} controls className="max-h-[60vh] w-full max-w-md rounded-lg" />
+          <video
+            src={videoUrl}
+            poster={thumbnailUrl ?? undefined}
+            controls
+            className="max-h-[60vh] w-full max-w-md rounded-lg"
+          />
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => window.open(videoUrl, "_blank")}>
               <Download className="h-4 w-4" /> Baixar vídeo
             </Button>
+            {thumbnailUrl && (
+              <Button variant="secondary" onClick={() => window.open(thumbnailUrl, "_blank")}>
+                <Download className="h-4 w-4" /> Baixar capa
+              </Button>
+            )}
             {logUrl && (
               <Button variant="ghost" onClick={() => window.open(logUrl, "_blank")}>
                 Ver buscas de imagem usadas

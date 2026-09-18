@@ -108,6 +108,7 @@ export interface TextToVideoJob {
   status: TextToVideoStatus;
   error: string | null;
   result_video: string | null;
+  result_thumbnail: string | null;
 }
 
 export interface SettingsInfo {

@@ -164,7 +164,8 @@ export function createTextToVideo(
   manualImages?: File[],
   chunkAssignments?: (number | null)[],
   subtitlesEnabled?: boolean,
-  orientation?: "horizontal" | "vertical"
+  orientation?: "horizontal" | "vertical",
+  coverImage?: File | null
 ): Promise<TextToVideoJob> {
   const formData = new FormData();
   formData.append("text", text);
@@ -181,7 +182,14 @@ export function createTextToVideo(
     formData.append("subtitles_enabled", "true");
   }
   formData.append("orientation", orientation ?? "horizontal");
+  if (coverImage) {
+    formData.append("cover_image", coverImage);
+  }
   return request<TextToVideoJob>("/api/text-to-video", { method: "POST", body: formData });
+}
+
+export function textToVideoThumbnailUrl(jobId: string): string {
+  return `${API_BASE}/api/text-to-video/${jobId}/thumbnail`;
 }
 
 export function getTextToVideo(jobId: string): Promise<TextToVideoJob> {

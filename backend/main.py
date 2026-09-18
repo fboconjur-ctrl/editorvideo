@@ -30,7 +30,13 @@ from pipeline.settings_store import (
     set_huggingface_token,
     set_pexels_api_key,
 )
-from pipeline.text_to_video import generate_video_from_text, split_into_chunks
+from pipeline.text_to_video import (
+    HORIZONTAL_RESOLUTION,
+    VERTICAL_RESOLUTION,
+    build_cover_thumbnail,
+    generate_video_from_text,
+    split_into_chunks,
+)
 from pipeline.tts import list_edge_voices, list_local_voices, synthesize_speech
 from pipeline.upscale import upscale
 from pipeline.youtube import download_audio
@@ -618,6 +624,7 @@ class TextToVideoJob(BaseModel):
     error: str | None = None
     result_video: str | None = None
     result_log: str | None = None
+    result_thumbnail: str | None = None
 
 
 TEXT_TO_VIDEO_JOBS: dict[str, TextToVideoJob] = {}
@@ -642,6 +649,7 @@ def _run_text_to_video(
     subtitle_font_size: int | None,
     subtitle_position: str,
     orientation: str,
+    cover_image_path: Path | None,
 ) -> None:
     job = TEXT_TO_VIDEO_JOBS[job_id]
     try:
@@ -660,9 +668,16 @@ def _run_text_to_video(
             orientation=orientation,
         )
 
+        thumbnail_path = None
+        if cover_image_path:
+            thumbnail_path = job_dir / "capa.jpg"
+            resolution = VERTICAL_RESOLUTION if orientation == "vertical" else HORIZONTAL_RESOLUTION
+            build_cover_thumbnail(cover_image_path, thumbnail_path, resolution=resolution)
+
         log_path = job_dir / "buscas_de_imagem.log.txt"
         job.result_video = str(output_path)
         job.result_log = str(log_path) if log_path.exists() else None
+        job.result_thumbnail = str(thumbnail_path) if thumbnail_path else None
         job.status = "done"
     except Exception as exc:  # noqa: BLE001
         job.status = "error"
@@ -682,13 +697,18 @@ async def create_text_to_video(
     subtitle_font_size: int = Form(0),
     subtitle_position: str = Form("bottom"),
     orientation: str = Form("horizontal"),
+    cover_image: UploadFile | None = File(None),
 ) -> TextToVideoJob:
     """`chunk_assignments`: JSON com uma lista do mesmo tamanho dos trechos
     do texto, onde cada item é o índice (dentro de `manual_images`) da
     imagem escolhida manualmente pra aquele trecho, ou `null` pra deixar
     a busca automática decidir. Isso evita depender de uma ordem/ciclo
     fixo das imagens enviadas, que na prática o usuário não controla bem
-    (ex: o navegador pode listar os arquivos selecionados fora de ordem)."""
+    (ex: o navegador pode listar os arquivos selecionados fora de ordem).
+
+    `cover_image`: foto opcional escolhida pelo usuário pra ser a capa do
+    vídeo (ex: pra usar como thumbnail ao postar em outro lugar) — não
+    entra no vídeo em si, só gera um arquivo de imagem separado."""
     job_id = str(uuid.uuid4())
 
     manual_image_map: dict[int, Path] | None = None
@@ -710,11 +730,20 @@ async def create_text_to_video(
             if image_index is not None and 0 <= image_index < len(saved_paths)
         }
 
+    cover_image_path: Path | None = None
+    if cover_image and cover_image.filename:
+        upload_dir = UPLOADS_DIR / job_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        suffix = Path(cover_image.filename).suffix or ".jpg"
+        cover_image_path = upload_dir / f"capa_original{suffix}"
+        with cover_image_path.open("wb") as f:
+            shutil.copyfileobj(cover_image.file, f)
+
     job = TextToVideoJob(id=job_id)
     TEXT_TO_VIDEO_JOBS[job_id] = job
     background_tasks.add_task(
         _run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None, manual_image_map,
-        subtitles_enabled, subtitle_font_size or None, subtitle_position, orientation,
+        subtitles_enabled, subtitle_font_size or None, subtitle_position, orientation, cover_image_path,
     )
     return job
 
@@ -722,6 +751,12 @@ async def create_text_to_video(
 @app.get("/api/text-to-video/{job_id}")
 async def get_text_to_video(job_id: str) -> TextToVideoJob:
     return TEXT_TO_VIDEO_JOBS[job_id]
+
+
+@app.get("/api/text-to-video/{job_id}/thumbnail")
+async def download_text_to_video_thumbnail(job_id: str) -> FileResponse:
+    job = TEXT_TO_VIDEO_JOBS[job_id]
+    return FileResponse(job.result_thumbnail, filename="capa.jpg")
 
 
 @app.get("/api/text-to-video/{job_id}/video")
