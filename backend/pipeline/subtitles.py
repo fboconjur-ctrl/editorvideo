@@ -44,27 +44,38 @@ def burn_subtitles(
     vez do tamanho fixo padrão do ffmpeg, que fica minúsculo em vídeos 4K
     e enorme em vídeos verticais pequenos).
     """
-    _width, height = probe_dimensions(video_path)
+    width, height = probe_dimensions(video_path)
     if font_size is None:
         font_size = max(12, round(height / 22))
 
     alignment = POSITION_TO_ALIGNMENT.get(position, 2)
     margin_v = round(height * 0.06)
 
+    # PlayResX/PlayResY dentro do force_style controlam diretamente o
+    # sistema de coordenadas que o libass usa pra interpretar FontSize e
+    # a largura de quebra de linha. Sem isso, o libass assume uma resolução
+    # padrão (normalmente 384x288) bem menor que o vídeo real, o que faz o
+    # texto quebrar em várias linhas e o bloco final ficar gigante. O
+    # parâmetro `original_size` do filtro `subtitles` deveria fazer esse
+    # ajuste automaticamente, mas na prática (testado) não tem efeito
+    # nenhum nessa build do ffmpeg — por isso fixamos Play*Res explicitamente.
     force_style = (
         f"FontSize={font_size},"
         f"PrimaryColour=&H00FFFFFF,"
         f"OutlineColour=&H00000000,"
         f"BorderStyle=1,Outline=2,Shadow=0,"
         f"Alignment={alignment},"
-        f"MarginV={margin_v}"
+        f"MarginV={margin_v},"
+        f"PlayResX={width},"
+        f"PlayResY={height}"
     )
 
     srt_escaped = str(srt_path).replace("\\", "/").replace(":", "\\:")
     cmd = [
         "ffmpeg", "-y",
         "-i", str(video_path),
-        "-vf", f"subtitles='{srt_escaped}':force_style='{force_style}'",
+        "-vf",
+        f"subtitles='{srt_escaped}':force_style='{force_style}'",
         "-c:a", "copy",
         str(output_path),
     ]
