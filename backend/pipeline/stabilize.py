@@ -10,7 +10,13 @@ def _run(cmd: list[str]) -> None:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr or ""
-        if "vidstab" in stderr.lower() or "no such filter" in stderr.lower() or "unknown filter" in stderr.lower():
+        lower = stderr.lower()
+        # A saída normal do vidstabdetect/vidstabtransform já contém a
+        # palavra "vidstab" o tempo todo (ex: "[vidstabdetect @ ...]"), então
+        # checar só por essa palavra classifica QUALQUER erro como "filtro
+        # ausente", mascarando o erro real. Só é de fato filtro ausente
+        # quando o ffmpeg reclama explicitamente de filtro desconhecido.
+        if ("unknown filter" in lower or "no such filter" in lower) and "vidstab" in lower:
             raise RuntimeError(
                 "Seu ffmpeg não tem suporte ao filtro vidstab (necessário para "
                 "estabilizar vídeo). Baixe um build 'full' do ffmpeg (ex: em "
@@ -18,7 +24,7 @@ def _run(cmd: list[str]) -> None:
                 "'essentials') e substitua o ffmpeg no seu PATH, ou desmarque a "
                 "opção 'Estabilizar imagem tremida'."
             ) from exc
-        raise RuntimeError(f"Falha ao estabilizar o vídeo: {stderr[-800:]}") from exc
+        raise RuntimeError(f"Falha ao estabilizar o vídeo: {stderr[-1500:]}") from exc
 
 
 def stabilize(input_path: Path, output_path: Path) -> None:
