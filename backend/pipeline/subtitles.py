@@ -59,11 +59,20 @@ def burn_subtitles(
     # parâmetro `original_size` do filtro `subtitles` deveria fazer esse
     # ajuste automaticamente, mas na prática (testado) não tem efeito
     # nenhum nessa build do ffmpeg — por isso fixamos Play*Res explicitamente.
+    #
+    # BorderStyle=3 desenha uma caixa sólida atrás do texto (em vez de só
+    # contorno) — texto branco sempre legível, independente da cor de
+    # fundo do vídeo/imagem embaixo (contorno sozinho falha em fundos
+    # muito claros, ex: céu, parede branca, roupa clara). Testado: o canal
+    # alfa de BackColour não é respeitado nessa build do libass/ffmpeg
+    # (sai sempre opaco), então usamos preto opaco direto em vez de fingir
+    # uma transparência que não acontece.
     force_style = (
         f"FontSize={font_size},"
         f"PrimaryColour=&H00FFFFFF,"
         f"OutlineColour=&H00000000,"
-        f"BorderStyle=1,Outline=2,Shadow=0,"
+        f"BackColour=&H00000000,"
+        f"BorderStyle=3,Outline=1,Shadow=0,"
         f"Alignment={alignment},"
         f"MarginV={margin_v},"
         f"PlayResX={width},"
