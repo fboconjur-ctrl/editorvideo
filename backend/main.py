@@ -37,7 +37,15 @@ from pipeline.text_to_video import (
     generate_video_from_text,
     split_into_chunks,
 )
-from pipeline.bumpers import get_bumper_path, remove_bumper, save_bumper
+from pipeline.bumpers import (
+    add_webcam_clip,
+    get_bumper_path,
+    get_random_webcam_clip,
+    list_webcam_clips,
+    remove_bumper,
+    remove_webcam_clip,
+    save_bumper,
+)
 from pipeline.tts import list_edge_voices, list_local_voices, synthesize_speech
 from pipeline.upscale import upscale
 from pipeline.youtube import download_audio
@@ -642,14 +650,14 @@ async def preview_text_to_video_chunks(text: str = Form(...)) -> list[str]:
 class BumperStatus(BaseModel):
     has_intro: bool
     has_outro: bool
-    has_webcam: bool
+    webcam_clips: list[str]
 
 
 def _bumpers_status() -> BumperStatus:
     return BumperStatus(
         has_intro=get_bumper_path("intro") is not None,
         has_outro=get_bumper_path("outro") is not None,
-        has_webcam=get_bumper_path("webcam") is not None,
+        webcam_clips=[p.name for p in list_webcam_clips()],
     )
 
 
@@ -662,27 +670,42 @@ async def get_bumpers_status() -> BumperStatus:
 async def upload_bumpers(
     intro_video: UploadFile | None = File(None),
     outro_video: UploadFile | None = File(None),
-    webcam_video: UploadFile | None = File(None),
 ) -> BumperStatus:
-    """Salva de forma persistente os vídeos próprios do texto-para-vídeo:
-    abertura/encerramento (ex: o usuário aparecendo em tela cheia) e/ou a
-    camada de webcam (ex: o usuário reagindo em silêncio, sobreposta num
-    canto durante o conteúdo narrado). Sobe uma vez, entra automaticamente
-    em toda geração depois disso, sem precisar subir de novo."""
+    """Salva de forma persistente os vídeos de abertura/encerramento (ex:
+    o usuário aparecendo em tela cheia). Sobe uma vez, entra
+    automaticamente em toda geração depois disso, sem precisar subir de
+    novo. Pra camada de webcam/reação, veja /api/text-to-video/webcam-clips
+    (é um conjunto de clipes, não um único arquivo)."""
     if intro_video and intro_video.filename:
         save_bumper("intro", intro_video.filename, intro_video.file)
     if outro_video and outro_video.filename:
         save_bumper("outro", outro_video.filename, outro_video.file)
-    if webcam_video and webcam_video.filename:
-        save_bumper("webcam", webcam_video.filename, webcam_video.file)
     return _bumpers_status()
 
 
 @app.delete("/api/text-to-video/bumpers/{which}")
 async def delete_bumper(which: str) -> BumperStatus:
-    if which not in ("intro", "outro", "webcam"):
-        raise HTTPException(status_code=400, detail="which deve ser 'intro', 'outro' ou 'webcam'")
+    if which not in ("intro", "outro"):
+        raise HTTPException(status_code=400, detail="which deve ser 'intro' ou 'outro'")
     remove_bumper(which)
+    return _bumpers_status()
+
+
+@app.post("/api/text-to-video/webcam-clips")
+async def upload_webcam_clips(clips: list[UploadFile] = File(...)) -> BumperStatus:
+    """Adiciona um ou mais clipes ao POOL de reação/webcam — um é
+    sorteado aleatoriamente a cada vídeo gerado, em vez de repetir sempre
+    o mesmo clipe curto em loop (visualmente ficava com "saltos" toda
+    vez que reiniciava)."""
+    for clip in clips:
+        if clip.filename:
+            add_webcam_clip(clip.filename, clip.file)
+    return _bumpers_status()
+
+
+@app.delete("/api/text-to-video/webcam-clips/{clip_name}")
+async def delete_webcam_clip(clip_name: str) -> BumperStatus:
+    remove_webcam_clip(clip_name)
     return _bumpers_status()
 
 
@@ -720,7 +743,7 @@ def _run_text_to_video(
             orientation=orientation,
             intro_video_path=get_bumper_path("intro") if use_intro else None,
             outro_video_path=get_bumper_path("outro") if use_outro else None,
-            webcam_video_path=get_bumper_path("webcam") if use_webcam else None,
+            webcam_video_path=get_random_webcam_clip() if use_webcam else None,
             webcam_position=webcam_position,
         )
 

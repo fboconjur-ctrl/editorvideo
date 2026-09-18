@@ -205,27 +205,36 @@ export type WebcamPosition = "bottom-right" | "bottom-left" | "top-right" | "top
 export interface BumperStatus {
   has_intro: boolean;
   has_outro: boolean;
-  has_webcam: boolean;
+  webcam_clips: string[];
 }
 
 export function getBumpersStatus(): Promise<BumperStatus> {
   return request<BumperStatus>("/api/text-to-video/bumpers");
 }
 
-export function uploadBumpers(
-  introVideo?: File | null,
-  outroVideo?: File | null,
-  webcamVideo?: File | null
-): Promise<BumperStatus> {
+export function uploadBumpers(introVideo?: File | null, outroVideo?: File | null): Promise<BumperStatus> {
   const formData = new FormData();
   if (introVideo) formData.append("intro_video", introVideo);
   if (outroVideo) formData.append("outro_video", outroVideo);
-  if (webcamVideo) formData.append("webcam_video", webcamVideo);
   return request<BumperStatus>("/api/text-to-video/bumpers", { method: "POST", body: formData });
 }
 
-export function deleteBumper(which: "intro" | "outro" | "webcam"): Promise<BumperStatus> {
+export function deleteBumper(which: "intro" | "outro"): Promise<BumperStatus> {
   return request<BumperStatus>(`/api/text-to-video/bumpers/${which}`, { method: "DELETE" });
+}
+
+export function uploadWebcamClips(clips: File[]): Promise<BumperStatus> {
+  const formData = new FormData();
+  for (const clip of clips) {
+    formData.append("clips", clip);
+  }
+  return request<BumperStatus>("/api/text-to-video/webcam-clips", { method: "POST", body: formData });
+}
+
+export function deleteWebcamClip(clipName: string): Promise<BumperStatus> {
+  return request<BumperStatus>(`/api/text-to-video/webcam-clips/${encodeURIComponent(clipName)}`, {
+    method: "DELETE",
+  });
 }
 
 export function getTextToVideo(jobId: string): Promise<TextToVideoJob> {

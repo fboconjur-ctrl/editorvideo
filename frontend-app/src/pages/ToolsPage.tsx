@@ -391,14 +391,10 @@ function TextToVideoCard() {
     refreshBumperStatus();
   }, []);
 
-  async function handleUploadBumper(which: "intro" | "outro" | "webcam", file: File) {
+  async function handleUploadBumper(which: "intro" | "outro", file: File) {
     setUploadingBumper(which);
     try {
-      const status = await api.uploadBumpers(
-        which === "intro" ? file : undefined,
-        which === "outro" ? file : undefined,
-        which === "webcam" ? file : undefined
-      );
+      const status = await api.uploadBumpers(which === "intro" ? file : undefined, which === "outro" ? file : undefined);
       setBumperStatus(status);
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
@@ -407,9 +403,31 @@ function TextToVideoCard() {
     }
   }
 
-  async function handleRemoveBumper(which: "intro" | "outro" | "webcam") {
+  async function handleRemoveBumper(which: "intro" | "outro") {
     try {
       const status = await api.deleteBumper(which);
+      setBumperStatus(status);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleUploadWebcamClips(files: File[]) {
+    if (files.length === 0) return;
+    setUploadingBumper("webcam");
+    try {
+      const status = await api.uploadWebcamClips(files);
+      setBumperStatus(status);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadingBumper(null);
+    }
+  }
+
+  async function handleRemoveWebcamClip(clipName: string) {
+    try {
+      const status = await api.deleteWebcamClip(clipName);
       setBumperStatus(status);
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
@@ -504,7 +522,7 @@ function TextToVideoCard() {
         coverImage,
         bumperStatus?.has_intro ? useIntro : false,
         bumperStatus?.has_outro ? useOutro : false,
-        bumperStatus?.has_webcam ? useWebcam : false,
+        (bumperStatus?.webcam_clips.length ?? 0) > 0 ? useWebcam : false,
         webcamPosition
       );
       await poll(job.id);
@@ -687,19 +705,20 @@ function TextToVideoCard() {
       <div className="mt-3 rounded-lg border border-base-700 bg-base-900 p-3">
         <label className="text-xs font-medium text-slate-300">Camada de reação (opcional)</label>
         <p className="mt-1 text-xs text-slate-500">
-          Suba um vídeo seu SEM narração (ex: você observando/reagindo em silêncio) — ele fica
-          salvo e aparece num canto da tela durante todo o conteúdo narrado (não na
-          abertura/encerramento). Dá uma cara mais autoral ao vídeo. Se for mais curto que o
-          conteúdo, repete em loop.
+          Suba um ou mais vídeos seus SEM narração (ex: você observando/reagindo em silêncio) —
+          eles ficam salvos e a cada vídeo gerado um é sorteado pra aparecer num canto da tela
+          durante o conteúdo narrado (não na abertura/encerramento). Vários clipes diferentes
+          evitam o "salto" perceptível de um clipe curto repetindo sempre igual. Recomendado: uns
+          60 segundos cada, em vez de 10s em loop.
         </p>
-        <div className="mt-2 rounded-lg border border-base-800 bg-base-950 p-2">
-          {bumperStatus?.has_webcam ? (
-            <div className="space-y-2">
+        <div className="mt-2 rounded-lg border border-base-800 bg-base-950 p-2 space-y-2">
+          {(bumperStatus?.webcam_clips.length ?? 0) > 0 && (
+            <>
               <Toggle
                 checked={useWebcam}
                 onChange={setUseWebcam}
                 label="Usar neste vídeo"
-                description="Já tem um vídeo salvo — desmarque pra gerar sem ele desta vez"
+                description={`${bumperStatus?.webcam_clips.length} clipe(s) salvo(s) — um é sorteado a cada geração`}
               />
               <div>
                 <label className="text-xs text-slate-400">Posição na tela</label>
@@ -714,23 +733,38 @@ function TextToVideoCard() {
                   <option value="top-left">Superior esquerdo</option>
                 </select>
               </div>
-              <Button variant="ghost" onClick={() => handleRemoveBumper("webcam")}>
-                Remover vídeo salvo
-              </Button>
-            </div>
-          ) : (
+              <ul className="space-y-1">
+                {bumperStatus?.webcam_clips.map((clip) => (
+                  <li key={clip} className="flex items-center justify-between gap-2 text-xs text-slate-400">
+                    <span className="truncate">{clip}</span>
+                    <button
+                      type="button"
+                      className="shrink-0 text-red-400 hover:text-red-300"
+                      onClick={() => handleRemoveWebcamClip(clip)}
+                    >
+                      Remover
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <div>
+            <label className="text-xs text-slate-400">Adicionar clipe(s)</label>
             <input
               type="file"
               accept="video/*"
-              className="input-field"
+              multiple
+              className="input-field mt-1"
               disabled={uploadingBumper === "webcam"}
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleUploadBumper("webcam", file);
+                const files = Array.from(e.target.files ?? []);
+                if (files.length > 0) handleUploadWebcamClips(files);
+                e.target.value = "";
               }}
             />
-          )}
-          {uploadingBumper === "webcam" && <p className="mt-1 text-xs text-slate-500">Enviando...</p>}
+          </div>
+          {uploadingBumper === "webcam" && <p className="text-xs text-slate-500">Enviando...</p>}
         </div>
       </div>
 
