@@ -20,6 +20,46 @@ MAX_WORDS_PER_CHUNK = 22
 
 _yake_extractor = yake.KeywordExtractor(lan="pt", n=2, top=3, dedupLim=0.9)
 
+# Bancos de fotos genéricos como o Pexels não têm fotos de políticos
+# específicos nem de conceitos jurídicos/econômicos abstratos — buscar o
+# nome de um ministro ou "Tribunal Superior Eleitoral" ao pé da letra só
+# traz resultado aleatório. Pra conteúdo de notícia (política, justiça,
+# economia, eleições), mapeamos pra termos visuais genéricos em inglês que
+# o banco de fotos realmente tem cobertura.
+_CONCEPT_MAP: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"tribunal|justiça|juiz|ministro|stf|stj|tse|processo jurídico|julgamento", re.I), "courthouse justice gavel"),
+    (re.compile(r"eleiç|eleitoral|candidat|voto|urna|campanha eleitoral", re.I), "election vote ballot"),
+    (re.compile(r"governo|federal|presidente|planalto|ministério|congresso|senado|câmara dos deputados", re.I), "government building"),
+    (re.compile(r"bolsa família|benefício|auxílio|programa social|inss|aposentadoria", re.I), "social welfare family"),
+    (re.compile(r"r\$|reais|bilhõ|milhõ|orçamento|contas públicas|dinheiro|valor mínimo|inflaç|econom", re.I), "money finance"),
+    (re.compile(r"saúde|hospital|médic|sus\b|vacina", re.I), "hospital healthcare"),
+    (re.compile(r"educaç|escola|estudante|universidade|professor", re.I), "school education classroom"),
+    (re.compile(r"polícia|segurança pública|crime|violência", re.I), "police security"),
+]
+
+
+def concept_query(chunk_text: str) -> str | None:
+    """Se o trecho bater com algum tema de notícia conhecido, devolve um
+    termo de busca genérico e visual em inglês. Retorna None se nada bater
+    (nesse caso o chamador cai pro fluxo normal de extração+tradução)."""
+    for pattern, query in _CONCEPT_MAP:
+        if pattern.search(chunk_text):
+            return query
+    return None
+
+
+def looks_like_proper_name(phrase: str) -> bool:
+    """Detecta se a frase extraída é provavelmente o nome de uma pessoa
+    (ex: "André Mendonça") — buscar isso no Pexels não traz nada útil,
+    então nesse caso é melhor usar um termo genérico do que o nome cru.
+    Heurística: em português, substantivos comuns numa frase no meio do
+    texto não vêm capitalizados — se TODAS as palavras da frase extraída
+    começam maiúsculas, é sinal forte de nome próprio."""
+    words = [w for w in phrase.split() if w]
+    if len(words) < 2:
+        return False
+    return all(w[0].isupper() for w in words)
+
 
 def extract_keyphrase(chunk_text: str) -> str:
     """Usa YAKE (extração estatística de palavras-chave, leve, sem baixar
@@ -71,12 +111,30 @@ def split_into_chunks(text: str, max_words: int = MAX_WORDS_PER_CHUNK) -> list[s
     return chunks
 
 
+def build_search_query(chunk_text: str) -> str:
+    """Decide a melhor query de busca pro trecho, em ordem de prioridade:
+    1. Tema de notícia conhecido (política/justiça/economia/etc.) -> termo
+       genérico e visual já em inglês.
+    2. Frase-chave extraída parece nome próprio -> termo genérico de
+       "notícia"/"imprensa" em vez de buscar o nome (não existe no banco).
+    3. Caso normal -> frase-chave extraída (YAKE) traduzida pro inglês.
+    """
+    concept = concept_query(chunk_text)
+    if concept:
+        return concept
+
+    keyphrase_pt = extract_keyphrase(chunk_text)
+    if looks_like_proper_name(keyphrase_pt):
+        return "press conference news"
+
+    return translate_to_english(keyphrase_pt)
+
+
 def search_pexels_image(chunk_text: str, api_key: str) -> tuple[bytes | None, str]:
     """Retorna (bytes da imagem ou None, query usada na busca) — a query é
     devolvida mesmo em caso de falha, para poder ser registrada num log de
     diagnóstico."""
-    keyphrase_pt = extract_keyphrase(chunk_text)
-    query = translate_to_english(keyphrase_pt)
+    query = build_search_query(chunk_text)
     try:
         resp = requests.get(
             "https://api.pexels.com/v1/search",
