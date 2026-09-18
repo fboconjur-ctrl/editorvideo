@@ -165,7 +165,9 @@ export function createTextToVideo(
   chunkAssignments?: (number | null)[],
   subtitlesEnabled?: boolean,
   orientation?: "horizontal" | "vertical",
-  coverImage?: File | null
+  coverImage?: File | null,
+  useIntro?: boolean,
+  useOutro?: boolean
 ): Promise<TextToVideoJob> {
   const formData = new FormData();
   formData.append("text", text);
@@ -185,11 +187,33 @@ export function createTextToVideo(
   if (coverImage) {
     formData.append("cover_image", coverImage);
   }
+  formData.append("use_intro", String(useIntro ?? true));
+  formData.append("use_outro", String(useOutro ?? true));
   return request<TextToVideoJob>("/api/text-to-video", { method: "POST", body: formData });
 }
 
 export function textToVideoThumbnailUrl(jobId: string): string {
   return `${API_BASE}/api/text-to-video/${jobId}/thumbnail`;
+}
+
+export interface BumperStatus {
+  has_intro: boolean;
+  has_outro: boolean;
+}
+
+export function getBumpersStatus(): Promise<BumperStatus> {
+  return request<BumperStatus>("/api/text-to-video/bumpers");
+}
+
+export function uploadBumpers(introVideo?: File | null, outroVideo?: File | null): Promise<BumperStatus> {
+  const formData = new FormData();
+  if (introVideo) formData.append("intro_video", introVideo);
+  if (outroVideo) formData.append("outro_video", outroVideo);
+  return request<BumperStatus>("/api/text-to-video/bumpers", { method: "POST", body: formData });
+}
+
+export function deleteBumper(which: "intro" | "outro"): Promise<BumperStatus> {
+  return request<BumperStatus>(`/api/text-to-video/bumpers/${which}`, { method: "DELETE" });
 }
 
 export function getTextToVideo(jobId: string): Promise<TextToVideoJob> {

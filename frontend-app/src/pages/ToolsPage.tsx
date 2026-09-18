@@ -372,12 +372,43 @@ function TextToVideoCard() {
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
   const [orientation, setOrientation] = useState<"horizontal" | "vertical">("horizontal");
 
+  const [bumperStatus, setBumperStatus] = useState<api.BumperStatus | null>(null);
+  const [useIntro, setUseIntro] = useState(true);
+  const [useOutro, setUseOutro] = useState(true);
+  const [uploadingBumper, setUploadingBumper] = useState<"intro" | "outro" | null>(null);
+
+  function refreshBumperStatus() {
+    api.getBumpersStatus().then(setBumperStatus).catch(() => setBumperStatus(null));
+  }
+
   useEffect(() => {
     api
       .getSettings()
       .then((s) => setHasPexelsKey(s.has_pexels_key))
       .catch(() => setHasPexelsKey(false));
+    refreshBumperStatus();
   }, []);
+
+  async function handleUploadBumper(which: "intro" | "outro", file: File) {
+    setUploadingBumper(which);
+    try {
+      const status = await api.uploadBumpers(which === "intro" ? file : undefined, which === "outro" ? file : undefined);
+      setBumperStatus(status);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadingBumper(null);
+    }
+  }
+
+  async function handleRemoveBumper(which: "intro" | "outro") {
+    try {
+      const status = await api.deleteBumper(which);
+      setBumperStatus(status);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   // As pré-visualizações são URLs de objeto locais (não sobem nada) — só
   // servem pra reconhecer visualmente qual arquivo é qual na hora de
@@ -464,7 +495,9 @@ function TextToVideoCard() {
         chunks ? assignments : undefined,
         subtitlesEnabled,
         orientation,
-        coverImage
+        coverImage,
+        bumperStatus?.has_intro ? useIntro : false,
+        bumperStatus?.has_outro ? useOutro : false
       );
       await poll(job.id);
     } catch (err) {
@@ -593,6 +626,53 @@ function TextToVideoCard() {
           {coverPreview && (
             <img src={coverPreview} alt="Capa" className="h-12 w-12 shrink-0 rounded object-cover" />
           )}
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-lg border border-base-700 bg-base-900 p-3">
+        <label className="text-xs font-medium text-slate-300">Abertura e encerramento (opcional)</label>
+        <p className="mt-1 text-xs text-slate-500">
+          Suba um vídeo seu (ex: você aparecendo) uma vez só — ele fica salvo e entra
+          automaticamente no início e/ou fim de todo vídeo gerado depois, sem precisar subir de novo.
+        </p>
+        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {(["intro", "outro"] as const).map((which) => {
+            const has = which === "intro" ? bumperStatus?.has_intro : bumperStatus?.has_outro;
+            const use = which === "intro" ? useIntro : useOutro;
+            const setUse = which === "intro" ? setUseIntro : setUseOutro;
+            return (
+              <div key={which} className="rounded-lg border border-base-800 bg-base-950 p-2">
+                <p className="text-xs font-medium text-slate-300">
+                  {which === "intro" ? "Abertura" : "Encerramento"}
+                </p>
+                {has ? (
+                  <div className="mt-2 space-y-2">
+                    <Toggle
+                      checked={use}
+                      onChange={setUse}
+                      label="Usar neste vídeo"
+                      description="Já tem um vídeo salvo — desmarque pra gerar sem ele desta vez"
+                    />
+                    <Button variant="ghost" onClick={() => handleRemoveBumper(which)}>
+                      Remover vídeo salvo
+                    </Button>
+                  </div>
+                ) : (
+                  <input
+                    type="file"
+                    accept="video/*"
+                    className="input-field mt-2"
+                    disabled={uploadingBumper === which}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleUploadBumper(which, file);
+                    }}
+                  />
+                )}
+                {uploadingBumper === which && <p className="mt-1 text-xs text-slate-500">Enviando...</p>}
+              </div>
+            );
+          })}
         </div>
       </div>
 

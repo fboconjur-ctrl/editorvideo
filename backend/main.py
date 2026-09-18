@@ -37,6 +37,7 @@ from pipeline.text_to_video import (
     generate_video_from_text,
     split_into_chunks,
 )
+from pipeline.bumpers import get_bumper_path, remove_bumper, save_bumper
 from pipeline.tts import list_edge_voices, list_local_voices, synthesize_speech
 from pipeline.upscale import upscale
 from pipeline.youtube import download_audio
@@ -638,6 +639,39 @@ async def preview_text_to_video_chunks(text: str = Form(...)) -> list[str]:
     return split_into_chunks(text)
 
 
+class BumperStatus(BaseModel):
+    has_intro: bool
+    has_outro: bool
+
+
+@app.get("/api/text-to-video/bumpers")
+async def get_bumpers_status() -> BumperStatus:
+    return BumperStatus(has_intro=get_bumper_path("intro") is not None, has_outro=get_bumper_path("outro") is not None)
+
+
+@app.post("/api/text-to-video/bumpers")
+async def upload_bumpers(
+    intro_video: UploadFile | None = File(None),
+    outro_video: UploadFile | None = File(None),
+) -> BumperStatus:
+    """Salva o vídeo de abertura/encerramento (ex: o usuário aparecendo)
+    de forma persistente — sobe uma vez, e ele entra automaticamente em
+    todo texto-para-vídeo gerado depois disso, sem precisar subir de novo."""
+    if intro_video and intro_video.filename:
+        save_bumper("intro", intro_video.filename, intro_video.file)
+    if outro_video and outro_video.filename:
+        save_bumper("outro", outro_video.filename, outro_video.file)
+    return await get_bumpers_status()
+
+
+@app.delete("/api/text-to-video/bumpers/{which}")
+async def delete_bumper(which: str) -> BumperStatus:
+    if which not in ("intro", "outro"):
+        raise HTTPException(status_code=400, detail="which deve ser 'intro' ou 'outro'")
+    remove_bumper(which)
+    return await get_bumpers_status()
+
+
 def _run_text_to_video(
     job_id: str,
     text: str,
@@ -650,6 +684,8 @@ def _run_text_to_video(
     subtitle_position: str,
     orientation: str,
     cover_image_path: Path | None,
+    use_intro: bool,
+    use_outro: bool,
 ) -> None:
     job = TEXT_TO_VIDEO_JOBS[job_id]
     try:
@@ -666,6 +702,8 @@ def _run_text_to_video(
             subtitle_font_size=subtitle_font_size,
             subtitle_position=subtitle_position,
             orientation=orientation,
+            intro_video_path=get_bumper_path("intro") if use_intro else None,
+            outro_video_path=get_bumper_path("outro") if use_outro else None,
         )
 
         thumbnail_path = None
@@ -698,6 +736,8 @@ async def create_text_to_video(
     subtitle_position: str = Form("bottom"),
     orientation: str = Form("horizontal"),
     cover_image: UploadFile | None = File(None),
+    use_intro: bool = Form(True),
+    use_outro: bool = Form(True),
 ) -> TextToVideoJob:
     """`chunk_assignments`: JSON com uma lista do mesmo tamanho dos trechos
     do texto, onde cada item é o índice (dentro de `manual_images`) da
@@ -744,6 +784,7 @@ async def create_text_to_video(
     background_tasks.add_task(
         _run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None, manual_image_map,
         subtitles_enabled, subtitle_font_size or None, subtitle_position, orientation, cover_image_path,
+        use_intro, use_outro,
     )
     return job
 

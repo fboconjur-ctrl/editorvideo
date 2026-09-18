@@ -3,6 +3,7 @@ backend/outputs/
 backend/.venv/
 backend/static/
 backend/config.json
+backend/user_media/
 tools/
 __pycache__/
 *.pyc

@@ -12,7 +12,7 @@ import requests
 import yake
 from deep_translator import GoogleTranslator
 
-from .ffprobe_utils import probe_duration
+from .ffprobe_utils import has_audio_stream, probe_duration
 from .subtitles import burn_subtitles, write_srt
 from .transcribe import Segment
 from .tts import synthesize_speech
@@ -411,6 +411,42 @@ def _build_segment_solid_color(
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+def build_bumper_from_video(
+    video_path: Path, output_path: Path, resolution: tuple[int, int] = HORIZONTAL_RESOLUTION
+) -> None:
+    """Converte um vídeo de abertura/encerramento próprio (ex: você
+    aparecendo) pro mesmo tamanho/codec dos outros trechos, pra poder
+    concatenar tudo sem erro no final. Letterbox em vez de cortar (não faz
+    sentido cortar pedaços de um vídeo que o usuário gravou de propósito).
+    Se o clipe não tiver áudio, adiciona uma trilha muda — os outros
+    trechos sempre têm áudio (a narração), e misturar clipes com/sem
+    áudio na mesma concatenação quebra a sincronia."""
+    w, h = resolution
+    vf = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x1d1f27,setsar=1"
+
+    if has_audio_stream(video_path):
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(video_path),
+            "-vf", vf,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-ar", "44100",
+            str(output_path),
+        ]
+    else:
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(video_path),
+            "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+            "-vf", vf,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-ar", "44100",
+            "-shortest",
+            str(output_path),
+        ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
 def build_cover_thumbnail(
     image_path: Path, output_path: Path, resolution: tuple[int, int] = HORIZONTAL_RESOLUTION
 ) -> None:
@@ -444,6 +480,8 @@ def generate_video_from_text(
     subtitle_font_size: int | None = None,
     subtitle_position: str = "bottom",
     orientation: str = "horizontal",
+    intro_video_path: Path | None = None,
+    outro_video_path: Path | None = None,
 ) -> None:
     """`manual_image_map`: mapa opcional {índice do trecho: caminho da
     imagem} para os trechos onde o usuário escolheu manualmente uma foto
@@ -458,7 +496,11 @@ def generate_video_from_text(
 
     `orientation`: "horizontal" (1920x1080, YouTube/paisagem) ou
     "vertical" (1080x1920, Reels/Shorts/TikTok) — também usado pra pedir
-    fotos/vídeos já no formato certo ao Pexels."""
+    fotos/vídeos já no formato certo ao Pexels.
+
+    `intro_video_path`/`outro_video_path`: vídeos próprios (ex: o usuário
+    aparecendo) pra colar no início/fim do vídeo gerado — não recebem
+    legenda automática (são conteúdo próprio, já pronto)."""
     chunks = split_into_chunks(text)
     if not chunks:
         raise ValueError("Texto vazio.")
@@ -469,11 +511,22 @@ def generate_video_from_text(
     query_log_lines = []
     used_media_ids: set[str] = set()
     subtitle_segments: list[Segment] = []
-    elapsed = 0.0
 
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         segment_paths = []
+
+        intro_segment_path = None
+        if intro_video_path:
+            intro_segment_path = tmp / "intro.mp4"
+            build_bumper_from_video(intro_video_path, intro_segment_path, resolution=resolution)
+            segment_paths.append(intro_segment_path)
+
+        # As legendas só começam a contar depois da abertura (ela não tem
+        # legenda automática — é conteúdo próprio já pronto), senão o
+        # tempo dos cues ficaria dessincronizado da narração real no
+        # vídeo final concatenado.
+        elapsed = probe_duration(intro_segment_path) if intro_segment_path else 0.0
 
         for i, chunk in enumerate(chunks):
             audio_path = tmp / f"audio_{i}.mp3"
@@ -505,6 +558,11 @@ def generate_video_from_text(
                 _build_segment_solid_color(audio_path, duration, segment_path, resolution=resolution)
 
             segment_paths.append(segment_path)
+
+        if outro_video_path:
+            outro_segment_path = tmp / "outro.mp4"
+            build_bumper_from_video(outro_video_path, outro_segment_path, resolution=resolution)
+            segment_paths.append(outro_segment_path)
 
         concat_list = tmp / "concat.txt"
         concat_list.write_text(
