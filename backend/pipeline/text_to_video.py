@@ -364,6 +364,7 @@ def _build_segment_from_image(
         "-i", str(audio_path),
         "-vf", vf,
         "-t", f"{duration:.3f}",
+        "-r", str(FPS),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-shortest",
@@ -384,6 +385,7 @@ def _build_segment_from_video(
         "-i", str(audio_path),
         "-vf", vf,
         "-t", f"{duration:.3f}",
+        "-r", str(FPS),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-shortest",
@@ -404,6 +406,7 @@ def _build_segment_solid_color(
         "-f", "lavfi", "-i", f"color=c=0x1d1f27:s={w}x{h}:d={duration:.3f}",
         "-i", str(audio_path),
         "-vf", _fade_filter(duration),
+        "-r", str(FPS),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-shortest",
@@ -416,12 +419,19 @@ def build_bumper_from_video(
     video_path: Path, output_path: Path, resolution: tuple[int, int] = HORIZONTAL_RESOLUTION
 ) -> None:
     """Converte um vídeo de abertura/encerramento próprio (ex: você
-    aparecendo) pro mesmo tamanho/codec dos outros trechos, pra poder
-    concatenar tudo sem erro no final. Letterbox em vez de cortar (não faz
-    sentido cortar pedaços de um vídeo que o usuário gravou de propósito).
-    Se o clipe não tiver áudio, adiciona uma trilha muda — os outros
-    trechos sempre têm áudio (a narração), e misturar clipes com/sem
-    áudio na mesma concatenação quebra a sincronia."""
+    aparecendo) pro mesmo tamanho/codec/taxa de quadros dos outros
+    trechos, pra poder concatenar tudo sem erro no final. Letterbox em vez
+    de cortar (não faz sentido cortar pedaços de um vídeo que o usuário
+    gravou de propósito). Se o clipe não tiver áudio, adiciona uma trilha
+    muda — os outros trechos sempre têm áudio (a narração), e misturar
+    clipes com/sem áudio na mesma concatenação quebra a sincronia.
+
+    IMPORTANTE: forçar `-r {FPS}` aqui é essencial — a concatenação final
+    usa `-c copy` (só remuxa, sem recodificar), que exige que TODOS os
+    arquivos tenham a mesma taxa de quadros/timebase. Sem isso, um vídeo
+    próprio com fps diferente (ex: 30 ou 60 do celular) faz o resultado
+    final "travar"/parar de tocar assim que esse trecho termina, mesmo
+    com os dados dos trechos seguintes intactos no arquivo."""
     w, h = resolution
     vf = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x1d1f27,setsar=1"
 
@@ -430,6 +440,7 @@ def build_bumper_from_video(
             "ffmpeg", "-y",
             "-i", str(video_path),
             "-vf", vf,
+            "-r", str(FPS),
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-ar", "44100",
             str(output_path),
@@ -440,6 +451,7 @@ def build_bumper_from_video(
             "-i", str(video_path),
             "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
             "-vf", vf,
+            "-r", str(FPS),
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-ar", "44100",
             "-shortest",
@@ -486,6 +498,7 @@ def apply_webcam_overlay(
         "-stream_loop", "-1", "-i", str(webcam_video_path),
         "-filter_complex", filter_complex,
         "-map", "[v]", "-map", "0:a?",
+        "-r", str(FPS),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-shortest",
