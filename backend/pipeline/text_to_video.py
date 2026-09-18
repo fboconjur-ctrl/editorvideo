@@ -499,21 +499,44 @@ def _fade_filter(duration: float) -> str:
     return f"fade=t=in:st=0:d={fade:.3f},fade=t=out:st={fade_out_start:.3f}:d={fade:.3f}"
 
 
+def _blur_fill_filter_complex(w: int, h: int, foreground_extra: str = "") -> str:
+    """Monta um filtro de "preencher com fundo desfocado" em vez de
+    cortar a mídia pra encaixar no formato do vídeo. Fotos/vídeos de
+    banco de imagens quase nunca vêm exatamente na proporção horizontal
+    ou vertical do vídeo final (ex: uma foto de rosto quase quadrada
+    usada num vídeo vertical 9:16) — cortar pra preencher a tela toda
+    (comportamento antigo) frequentemente cortava parte importante da
+    imagem (ex: cortava a cabeça da pessoa). Aqui a mídia inteira fica
+    sempre visível, centralizada, e o espaço ao redor é preenchido com
+    uma cópia da própria mídia, ampliada e desfocada — mesma técnica dos
+    stories do Instagram/TikTok, evita tanto o corte quanto as tarjas
+    pretas feias."""
+    return (
+        f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+        f"gblur=sigma=25,eq=brightness=-0.05[bg];"
+        f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];"
+        f"[bg][fg]overlay=(W-w)/2:(H-h)/2{foreground_extra}[v]"
+    )
+
+
 def _build_segment_from_image(
     image_path: Path, audio_path: Path, duration: float, output_path: Path,
     resolution: tuple[int, int] = HORIZONTAL_RESOLUTION,
 ) -> None:
     w, h = resolution
-    vf = (
-        f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
-        f"zoompan=z='min(zoom+0.0008,1.08)':d={int(duration * FPS)}:s={w}x{h}:fps={FPS},"
-        f"{_fade_filter(duration)}"
+    filter_complex = _blur_fill_filter_complex(
+        w, h,
+        foreground_extra=(
+            f",zoompan=z='min(zoom+0.0008,1.08)':d={int(duration * FPS)}:s={w}x{h}:fps={FPS},"
+            f"{_fade_filter(duration)}"
+        ),
     )
     cmd = [
         "ffmpeg", "-y",
         "-loop", "1", "-i", str(image_path),
         "-i", str(audio_path),
-        "-vf", vf,
+        "-filter_complex", filter_complex,
+        "-map", "[v]", "-map", "1:a",
         "-t", f"{duration:.3f}",
         "-r", str(FPS),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
@@ -529,12 +552,13 @@ def _build_segment_from_video(
     resolution: tuple[int, int] = HORIZONTAL_RESOLUTION,
 ) -> None:
     w, h = resolution
-    vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},{_fade_filter(duration)}"
+    filter_complex = _blur_fill_filter_complex(w, h, foreground_extra=f",{_fade_filter(duration)}")
     cmd = [
         "ffmpeg", "-y",
         "-stream_loop", "-1", "-i", str(video_path),
         "-i", str(audio_path),
-        "-vf", vf,
+        "-filter_complex", filter_complex,
+        "-map", "[v]", "-map", "1:a",
         "-t", f"{duration:.3f}",
         "-r", str(FPS),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
@@ -821,6 +845,14 @@ def generate_video_from_text(
             check=True, capture_output=True, text=True,
         )
         content_current = content_concat
+
+        # Se por algum motivo o timing por palavra não vier (ex: falha de
+        # rede pontual, mudança futura do serviço) todos os karaoke_chunks
+        # ficam vazios — nesse caso cai pra legenda estática em vez de
+        # gerar um .ass sem nenhuma linha e o vídeo sair sem legenda
+        # nenhuma, silenciosamente.
+        if karaoke_active and not any(karaoke_chunks):
+            karaoke_active = False
 
         if karaoke_active:
             ass_path = tmp / "legendas.ass"

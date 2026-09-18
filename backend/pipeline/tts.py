@@ -124,7 +124,15 @@ def synthesize_speech_edge_with_words(
     async def _run() -> list[WordTiming]:
         percent = rate or 0
         rate_str = f"+{percent}%" if percent >= 0 else f"{percent}%"
-        communicate = edge_tts.Communicate(text, voice_id or "pt-BR-FranciscaNeural", rate=rate_str)
+        # boundary="WordBoundary" é essencial aqui — o padrão da
+        # biblioteca é "SentenceBoundary" (frase inteira, sem timing por
+        # palavra); sem isso o stream nunca emite eventos "WordBoundary"
+        # e a legenda karaokê sai sem nenhum texto (silenciosamente, sem
+        # erro nenhum, porque a narração e o vídeo continuam sendo
+        # gerados normalmente — só a legenda fica vazia).
+        communicate = edge_tts.Communicate(
+            text, voice_id or "pt-BR-FranciscaNeural", rate=rate_str, boundary="WordBoundary"
+        )
         words: list[WordTiming] = []
         # 100-ns ("ticks") é a unidade que o serviço da Microsoft usa pra
         # offset/duration — precisa dividir por 10_000_000 pra virar segundos.
