@@ -770,16 +770,16 @@ function TextToVideoCard() {
 
       <div className="mt-3 rounded-lg border border-base-700 bg-base-900 p-3">
         <label className="text-xs font-medium text-slate-300">
-          Usar minhas próprias imagens (opcional)
+          Usar minhas próprias fotos ou vídeos (opcional)
         </label>
         <p className="mt-1 text-xs text-slate-500">
-          A busca automática às vezes traz fotos artificiais/genéricas demais. Suba suas imagens aqui
-          e depois escolha exatamente qual foto vai em cada trecho do texto — dá pra deixar alguns
-          trechos no automático e só substituir os que ficaram ruins.
+          A busca automática às vezes traz mídia artificial/genérica demais. Suba suas fotos e/ou
+          vídeos aqui e depois escolha exatamente qual vai em cada trecho do texto — dá pra deixar
+          alguns trechos no automático e só substituir os que ficaram ruins.
         </p>
         <input
           type="file"
-          accept="image/*"
+          accept="image/*,video/*"
           multiple
           className="input-field mt-2"
           onChange={(e) => setManualImages(Array.from(e.target.files ?? []))}
@@ -789,7 +789,11 @@ function TextToVideoCard() {
           <div className="mt-2 flex flex-wrap gap-2">
             {imagePreviews.map((url, i) => (
               <div key={i} className="flex flex-col items-center gap-1">
-                <img src={url} alt={manualImages[i]?.name} className="h-14 w-14 rounded object-cover" />
+                {manualImages[i]?.type.startsWith("video/") ? (
+                  <video src={url} muted className="h-14 w-14 rounded object-cover" />
+                ) : (
+                  <img src={url} alt={manualImages[i]?.name} className="h-14 w-14 rounded object-cover" />
+                )}
                 <span className="max-w-[3.5rem] truncate text-[10px] text-slate-500">{manualImages[i]?.name}</span>
               </div>
             ))}

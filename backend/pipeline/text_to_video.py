@@ -4,7 +4,6 @@ trecho — nessa ordem de qualidade: foto real (Wikipedia) > vídeo de banco
 (Pexels) > foto de banco (Pexels) > fundo sólido. Monta tudo com transição
 suave (fade) entre os cortes, sincronizado com o áudio de cada trecho."""
 import re
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -22,6 +21,10 @@ HORIZONTAL_RESOLUTION = (1920, 1080)
 VERTICAL_RESOLUTION = (1080, 1920)
 FPS = 25
 FADE_SECONDS = 0.35
+# Usado pra decidir se um arquivo enviado manualmente pelo usuário
+# (foto ou vídeo) deve virar um segmento animado (zoompan) ou um clipe
+# de vídeo de verdade, baseado só na extensão.
+_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 # Trechos menores = mais cortes de imagem/vídeo no resultado final, no
 # ritmo de vídeo de notícia/redes sociais (uma mídia nova a cada poucos
 # segundos, não uma a cada frase longa).
@@ -366,7 +369,7 @@ def _build_segment_from_image(
         "-t", f"{duration:.3f}",
         "-r", str(FPS),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2",
         "-shortest",
         str(output_path),
     ]
@@ -387,7 +390,7 @@ def _build_segment_from_video(
         "-t", f"{duration:.3f}",
         "-r", str(FPS),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2",
         "-shortest",
         str(output_path),
     ]
@@ -408,7 +411,7 @@ def _build_segment_solid_color(
         "-vf", _fade_filter(duration),
         "-r", str(FPS),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2",
         "-shortest",
         str(output_path),
     ]
@@ -442,7 +445,7 @@ def build_bumper_from_video(
             "-vf", vf,
             "-r", str(FPS),
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-ar", "44100",
+            "-c:a", "aac", "-ar", "44100", "-ac", "2",
             str(output_path),
         ]
     else:
@@ -453,7 +456,7 @@ def build_bumper_from_video(
             "-vf", vf,
             "-r", str(FPS),
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-ar", "44100",
+            "-c:a", "aac", "-ar", "44100", "-ac", "2",
             "-shortest",
             str(output_path),
         ]
@@ -500,7 +503,7 @@ def apply_webcam_overlay(
         "-map", "[v]", "-map", "0:a?",
         "-r", str(FPS),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2",
         "-shortest",
         str(output_path),
     ]
@@ -545,10 +548,11 @@ def generate_video_from_text(
     webcam_video_path: Path | None = None,
     webcam_position: str = "bottom-right",
 ) -> None:
-    """`manual_image_map`: mapa opcional {índice do trecho: caminho da
-    imagem} para os trechos onde o usuário escolheu manualmente uma foto
-    (porque a busca automática às vezes traz fotos artificiais/genéricas
-    demais pro tema). Um trecho sem entrada no mapa cai na busca
+    """`manual_image_map`: mapa opcional {índice do trecho: caminho do
+    arquivo} para os trechos onde o usuário escolheu manualmente uma foto
+    OU um vídeo (porque a busca automática às vezes traz mídia
+    artificial/genérica demais pro tema) — o tipo é decidido pela
+    extensão do arquivo. Um trecho sem entrada no mapa cai na busca
     automática normal — dá pra misturar os dois num mesmo vídeo, em vez
     de ser tudo automático ou tudo manual.
 
@@ -597,23 +601,32 @@ def generate_video_from_text(
 
             manual_path = manual_image_map.get(i)
             if manual_path:
-                media_type, media_bytes, source_desc = "photo", manual_path.read_bytes(), f"manual:{manual_path.name}"
+                # O usuário já escolheu um arquivo específico (foto OU
+                # vídeo) — usa direto do disco, sem buscar nada. O tipo é
+                # decidido pela extensão do arquivo enviado.
+                media_type = "video" if manual_path.suffix.lower() in _VIDEO_EXTENSIONS else "photo"
+                source_desc = f"manual:{manual_path.name}"
+                query_log_lines.append(f"[{i}] fonte=\"{source_desc}\" ({media_type}) | trecho=\"{chunk}\"")
+                if media_type == "video":
+                    _build_segment_from_video(manual_path, audio_path, duration, segment_path, resolution=resolution)
+                else:
+                    _build_segment_from_image(manual_path, audio_path, duration, segment_path, resolution=resolution)
             else:
                 media_type, media_bytes, source_desc = resolve_media_for_chunk(
                     chunk, pexels_api_key, used_media_ids, chunk_index=i, resolution=resolution
                 )
-            query_log_lines.append(f"[{i}] fonte=\"{source_desc}\" ({media_type}) | trecho=\"{chunk}\"")
+                query_log_lines.append(f"[{i}] fonte=\"{source_desc}\" ({media_type}) | trecho=\"{chunk}\"")
 
-            if media_type == "video" and media_bytes:
-                video_path = tmp / f"media_{i}.mp4"
-                video_path.write_bytes(media_bytes)
-                _build_segment_from_video(video_path, audio_path, duration, segment_path, resolution=resolution)
-            elif media_type == "photo" and media_bytes:
-                image_path = tmp / f"media_{i}.jpg"
-                image_path.write_bytes(media_bytes)
-                _build_segment_from_image(image_path, audio_path, duration, segment_path, resolution=resolution)
-            else:
-                _build_segment_solid_color(audio_path, duration, segment_path, resolution=resolution)
+                if media_type == "video" and media_bytes:
+                    video_path = tmp / f"media_{i}.mp4"
+                    video_path.write_bytes(media_bytes)
+                    _build_segment_from_video(video_path, audio_path, duration, segment_path, resolution=resolution)
+                elif media_type == "photo" and media_bytes:
+                    image_path = tmp / f"media_{i}.jpg"
+                    image_path.write_bytes(media_bytes)
+                    _build_segment_from_image(image_path, audio_path, duration, segment_path, resolution=resolution)
+                else:
+                    _build_segment_solid_color(audio_path, duration, segment_path, resolution=resolution)
 
             content_segment_paths.append(segment_path)
 
@@ -661,15 +674,24 @@ def generate_video_from_text(
             build_bumper_from_video(outro_video_path, outro_segment_path, resolution=resolution)
             final_segment_paths.append(outro_segment_path)
 
+        # -movflags +faststart move o índice (moov atom) pro início do
+        # arquivo — sem isso, o navegador só consegue tocar o vídeo depois
+        # de baixar o arquivo inteiro (ou só toca o primeiro trecho antes
+        # disso), porque o índice fica no final. Sempre remuxa por ffmpeg
+        # (mesmo sem abertura/encerramento) pra garantir isso.
         if len(final_segment_paths) == 1:
-            shutil.copy(content_current, output_path)
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(content_current), "-c", "copy", "-movflags", "+faststart", str(output_path)],
+                check=True, capture_output=True, text=True,
+            )
         else:
             final_list = tmp / "final_concat.txt"
             final_list.write_text(
                 "\n".join(f"file '{p.as_posix()}'" for p in final_segment_paths), encoding="utf-8"
             )
             subprocess.run(
-                ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(final_list), "-c", "copy", str(output_path)],
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(final_list),
+                 "-c", "copy", "-movflags", "+faststart", str(output_path)],
                 check=True, capture_output=True, text=True,
             )
 
