@@ -31,3 +31,17 @@ def probe_dimensions(video_path: Path) -> tuple[int, int]:
     )
     stream = json.loads(result.stdout)["streams"][0]
     return stream["width"], stream["height"]
+
+
+def has_audio_stream(video_path: Path) -> bool:
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "0",
+            "-select_streams", "a",
+            "-show_entries", "stream=index",
+            "-of", "json",
+            str(video_path),
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    return bool(json.loads(result.stdout).get("streams"))

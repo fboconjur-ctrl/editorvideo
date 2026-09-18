@@ -21,12 +21,60 @@ def _format_timestamp(seconds: float) -> str:
     return f"{int(hours):02d}:{int(minutes):02d}:{int(secs):02d},{millis:03d}"
 
 
+def _wrap_caption_text(text: str, max_line_chars: int = 24) -> str:
+    """Quebra o texto em linhas curtas (estilo legenda de rede social) em
+    vez de deixar o libass decidir sozinho onde quebrar — com fonte grande
+    e vídeo estreito (vertical), a quebra automática do libass gerava até
+    5-6 linhas empilhadas pra uma frase só, com uma caixa de fundo em cada
+    linha (visual "picotado", feio). Quebrando aqui em linhas de ~24
+    caracteres, a legenda fica em no máximo 2-3 linhas curtas e legíveis."""
+    words = text.split()
+    lines: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for word in words:
+        added_len = len(word) + (1 if current else 0)
+        if current and current_len + added_len > max_line_chars:
+            lines.append(" ".join(current))
+            current, current_len = [], 0
+        current.append(word)
+        current_len += len(word) + (1 if len(current) > 1 else 0)
+    if current:
+        lines.append(" ".join(current))
+    return "\n".join(lines)
+
+
+def resplit_segments_for_captions(segments: list[Segment], max_words: int = 7) -> list[Segment]:
+    """Quebra segmentos longos (frases inteiras vindas do Whisper) em
+    vários cues menores de no máximo `max_words` palavras cada, distribuindo
+    o tempo proporcionalmente ao número de palavras — sem isso, uma frase
+    de 20+ palavras vira uma legenda só, gigante, ocupando a tela inteira
+    pela duração toda da frase. Cues menores e mais frequentes é o padrão
+    de legenda usado em vídeo de rede social (CapCut, Captions.app etc)."""
+    result: list[Segment] = []
+    for seg in segments:
+        words = seg.text.split()
+        if len(words) <= max_words:
+            result.append(seg)
+            continue
+        total_duration = seg.end - seg.start
+        total_words = len(words)
+        elapsed_words = 0
+        for i in range(0, total_words, max_words):
+            chunk_words = words[i : i + max_words]
+            start = seg.start + total_duration * (elapsed_words / total_words)
+            elapsed_words += len(chunk_words)
+            end = seg.start + total_duration * (elapsed_words / total_words)
+            result.append(Segment(start=start, end=end, text=" ".join(chunk_words)))
+    return result
+
+
 def write_srt(segments: list[Segment], srt_path: Path) -> None:
     lines = []
     for i, seg in enumerate(segments, start=1):
         lines.append(str(i))
         lines.append(f"{_format_timestamp(seg.start)} --> {_format_timestamp(seg.end)}")
-        lines.append(seg.text)
+        lines.append(_wrap_caption_text(seg.text))
         lines.append("")
     srt_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -46,7 +94,12 @@ def burn_subtitles(
     """
     width, height = probe_dimensions(video_path)
     if font_size is None:
-        font_size = max(12, round(height / 22))
+        # Baseado na MENOR dimensão (não só a altura): num vídeo vertical
+        # a largura é o fator limitante pra quantas palavras cabem numa
+        # linha — usar só a altura (bem maior que a largura no vertical)
+        # gerava fonte grande demais pra largura disponível, forçando
+        # quebra em muitas linhas.
+        font_size = max(16, round(min(width, height) / 18))
 
     alignment = POSITION_TO_ALIGNMENT.get(position, 2)
     margin_v = round(height * 0.06)

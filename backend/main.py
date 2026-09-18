@@ -21,7 +21,7 @@ from pipeline.filler_removal import remove_fillers
 from pipeline.reframe import reframe_vertical
 from pipeline.silence_cut import cut_silence
 from pipeline.stabilize import stabilize
-from pipeline.subtitles import burn_subtitles, write_srt
+from pipeline.subtitles import burn_subtitles, resplit_segments_for_captions, write_srt
 from pipeline.timeline_render import render_edl
 from pipeline.transcribe import transcribe
 from pipeline.settings_store import (
@@ -164,7 +164,7 @@ def _run_pipeline(
 
             job.status = "generating_subtitles"
             srt_path = job_dir / "legendas.srt"
-            write_srt(segments, srt_path)
+            write_srt(resplit_segments_for_captions(segments), srt_path)
 
             if burn_in:
                 final_video = job_dir / "final.mp4"
