@@ -12,3 +12,4 @@ yt-dlp>=2024.10.7
 edge-tts>=6.1.19
 requests>=2.32.0
 deep-translator>=1.11.4
+yake>=0.4.8

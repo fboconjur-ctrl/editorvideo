@@ -163,3 +163,7 @@ export function getTextToVideo(jobId: string): Promise<TextToVideoJob> {
 export function textToVideoUrl(jobId: string): string {
   return `${API_BASE}/api/text-to-video/${jobId}/video`;
 }
+
+export function textToVideoLogUrl(jobId: string): string {
+  return `${API_BASE}/api/text-to-video/${jobId}/log`;
+}

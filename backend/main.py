@@ -574,6 +574,7 @@ class TextToVideoJob(BaseModel):
     status: TextToVideoStatus = "queued"
     error: str | None = None
     result_video: str | None = None
+    result_log: str | None = None
 
 
 TEXT_TO_VIDEO_JOBS: dict[str, TextToVideoJob] = {}
@@ -590,7 +591,9 @@ def _run_text_to_video(job_id: str, text: str, engine: str, voice_id: str | None
         api_key = get_pexels_api_key() or ""
         generate_video_from_text(text, output_path, api_key, tts_engine=engine, voice_id=voice_id, rate=rate)
 
+        log_path = job_dir / "buscas_de_imagem.log.txt"
         job.result_video = str(output_path)
+        job.result_log = str(log_path) if log_path.exists() else None
         job.status = "done"
     except Exception as exc:  # noqa: BLE001
         job.status = "error"
@@ -621,6 +624,12 @@ async def get_text_to_video(job_id: str) -> TextToVideoJob:
 async def download_text_to_video(job_id: str) -> FileResponse:
     job = TEXT_TO_VIDEO_JOBS[job_id]
     return FileResponse(job.result_video, filename="video.mp4")
+
+
+@app.get("/api/text-to-video/{job_id}/log")
+async def download_text_to_video_log(job_id: str) -> FileResponse:
+    job = TEXT_TO_VIDEO_JOBS[job_id]
+    return FileResponse(job.result_log, filename="buscas_de_imagem.log.txt")
 
 
 # --- Frontend ---------------------------------------------------------------

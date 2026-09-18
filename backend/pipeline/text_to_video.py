@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 import requests
+import yake
 from deep_translator import GoogleTranslator
 
 from .ffprobe_utils import probe_duration
@@ -16,51 +17,35 @@ from .tts import synthesize_speech
 RESOLUTION = (1920, 1080)
 FPS = 25
 MAX_WORDS_PER_CHUNK = 22
-MAX_KEYWORDS = 5
 
-# Palavras muito comuns em inglês que não ajudam a achar uma foto
-# relevante — removidas do texto já traduzido antes de montar a busca.
-_STOPWORDS_EN = {
-    "the", "a", "an", "of", "in", "on", "at", "to", "for", "with", "without", "about",
-    "between", "and", "or", "but", "that", "this", "these", "those", "is", "was", "are",
-    "were", "be", "been", "being", "it", "its", "as", "by", "from", "into", "than",
-    "then", "so", "very", "much", "many", "more", "less", "also", "only", "just",
-    "already", "not", "yes", "his", "her", "their", "our", "my", "your", "i", "you",
-    "he", "she", "we", "they", "them", "has", "have", "had", "will", "would", "can",
-    "could", "should", "there", "here", "today", "now", "want", "wants", "wanted",
-}
+_yake_extractor = yake.KeywordExtractor(lan="pt", n=2, top=3, dedupLim=0.9)
 
 
-def extract_keywords(english_text: str, max_keywords: int = MAX_KEYWORDS) -> str:
-    """Tira pontuação/stopwords do texto (já traduzido pro inglês) e fica
-    só com as palavras mais prováveis de render uma busca de imagem
-    melhor do que a frase inteira crua.
-
-    Mantém a ORDEM original das palavras — importante pra frases compostas
-    tipo "electoral court" continuarem juntas em vez de embaralhadas com
-    palavras soltas de outras partes da frase."""
-    words = re.findall(r"[A-Za-z]+", english_text.lower())
-    keywords = [w for w in words if len(w) > 2 and w not in _STOPWORDS_EN]
+def extract_keyphrase(chunk_text: str) -> str:
+    """Usa YAKE (extração estatística de palavras-chave, leve, sem baixar
+    modelo) pra achar a frase-chave mais relevante do trecho em português
+    — bem melhor do que filtrar stopwords manualmente, porque o YAKE
+    reconhece expressões compostas como unidade ("tribunal eleitoral" e
+    "tribunal militar" saem como frases distintas, não como palavras
+    soltas embaralhadas)."""
+    keywords = _yake_extractor.extract_keywords(chunk_text)
     if not keywords:
-        keywords = words
-    # remove duplicatas mas preserva a primeira ocorrência/ordem
-    seen = set()
-    ordered_unique = []
-    for w in keywords:
-        if w not in seen:
-            seen.add(w)
-            ordered_unique.append(w)
-    return " ".join(ordered_unique[:max_keywords])
+        return chunk_text
+    # keywords vem ordenado por relevância (score menor = mais relevante)
+    best_phrase, _score = min(keywords, key=lambda kw: kw[1])
+    return best_phrase
 
 
 def translate_to_english(text: str) -> str:
     """O catálogo/índice do Pexels responde muito melhor a termos em
-    inglês. Traduz a frase INTEIRA (preserva o contexto — ex: "tribunal
-    eleitoral" vira corretamente "electoral court", em vez de traduzir
-    palavras soltas e perder o sentido). Se a tradução falhar (ex: sem
-    internet no momento), usa o texto original em português como fallback."""
+    inglês. Traduz só a frase-chave já extraída (curta, então a chamada
+    de tradução é rápida) preservando o contexto da expressão — ex:
+    "tribunal eleitoral" vira corretamente "electoral court". Se a
+    tradução falhar (ex: sem internet no momento), usa a frase-chave em
+    português mesmo como fallback — ainda assim específica o bastante
+    pra buscar uma foto razoável."""
     try:
-        translated = GoogleTranslator(source="pt", target="en").translate(text[:400])
+        translated = GoogleTranslator(source="pt", target="en").translate(text[:100])
         return translated or text
     except Exception:  # noqa: BLE001 - tradução é best-effort
         return text
@@ -86,9 +71,12 @@ def split_into_chunks(text: str, max_words: int = MAX_WORDS_PER_CHUNK) -> list[s
     return chunks
 
 
-def search_pexels_image(chunk_text: str, api_key: str) -> bytes | None:
-    english_text = translate_to_english(chunk_text)
-    query = extract_keywords(english_text) or english_text
+def search_pexels_image(chunk_text: str, api_key: str) -> tuple[bytes | None, str]:
+    """Retorna (bytes da imagem ou None, query usada na busca) — a query é
+    devolvida mesmo em caso de falha, para poder ser registrada num log de
+    diagnóstico."""
+    keyphrase_pt = extract_keyphrase(chunk_text)
+    query = translate_to_english(keyphrase_pt)
     try:
         resp = requests.get(
             "https://api.pexels.com/v1/search",
@@ -99,12 +87,12 @@ def search_pexels_image(chunk_text: str, api_key: str) -> bytes | None:
         resp.raise_for_status()
         photos = resp.json().get("photos", [])
         if not photos:
-            return None
+            return None, query
         image_resp = requests.get(photos[0]["src"]["large"], timeout=15)
         image_resp.raise_for_status()
-        return image_resp.content
+        return image_resp.content, query
     except requests.RequestException:
-        return None
+        return None, query
 
 
 def _build_segment_from_image(image_path: Path, audio_path: Path, duration: float, output_path: Path) -> None:
@@ -155,6 +143,8 @@ def generate_video_from_text(
     if not chunks:
         raise ValueError("Texto vazio.")
 
+    query_log_lines = []
+
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         segment_paths = []
@@ -165,7 +155,10 @@ def generate_video_from_text(
             duration = probe_duration(audio_path)
 
             segment_path = tmp / f"segment_{i}.mp4"
-            image_bytes = search_pexels_image(chunk, pexels_api_key) if pexels_api_key else None
+            image_bytes, used_query = (
+                search_pexels_image(chunk, pexels_api_key) if pexels_api_key else (None, "")
+            )
+            query_log_lines.append(f"[{i}] busca=\"{used_query}\" | trecho=\"{chunk}\"")
             if image_bytes:
                 image_path = tmp / f"image_{i}.jpg"
                 image_path.write_bytes(image_bytes)
@@ -187,3 +180,6 @@ def generate_video_from_text(
             str(output_path),
         ]
         subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+    log_path = output_path.parent / "buscas_de_imagem.log.txt"
+    log_path.write_text("\n".join(query_log_lines), encoding="utf-8")

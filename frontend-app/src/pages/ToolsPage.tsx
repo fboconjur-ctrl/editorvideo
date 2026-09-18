@@ -274,6 +274,7 @@ function TextToVideoCard() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [logUrl, setLogUrl] = useState<string | null>(null);
 
   const [hasPexelsKey, setHasPexelsKey] = useState<boolean | null>(null);
   const [pexelsKeyInput, setPexelsKeyInput] = useState("");
@@ -304,6 +305,7 @@ function TextToVideoCard() {
     if (!text.trim()) return;
     setBusy(true);
     setVideoUrl(null);
+    setLogUrl(null);
     setStatus("Gerando narração e buscando imagens (pode demorar alguns minutos)...");
     try {
       const job = await api.createTextToVideo(text, selection.engine, Number(rate) || 0, selection.voiceId || undefined);
@@ -321,6 +323,7 @@ function TextToVideoCard() {
       if (job.status === "done") {
         setStatus("Vídeo gerado!");
         setVideoUrl(api.textToVideoUrl(jobId));
+        setLogUrl(api.textToVideoLogUrl(jobId));
         setBusy(false);
         return;
       }
@@ -395,10 +398,15 @@ function TextToVideoCard() {
       {videoUrl && (
         <div className="mt-3 space-y-2">
           <video src={videoUrl} controls className="max-h-[60vh] w-full max-w-md rounded-lg" />
-          <div>
+          <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => window.open(videoUrl, "_blank")}>
               <Download className="h-4 w-4" /> Baixar vídeo
             </Button>
+            {logUrl && (
+              <Button variant="ghost" onClick={() => window.open(logUrl, "_blank")}>
+                Ver buscas de imagem usadas
+              </Button>
+            )}
           </div>
         </div>
       )}
