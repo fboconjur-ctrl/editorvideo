@@ -22,7 +22,9 @@ from pipeline.stabilize import stabilize
 from pipeline.subtitles import burn_subtitles, write_srt
 from pipeline.timeline_render import render_edl
 from pipeline.transcribe import transcribe
-from pipeline.tts import list_voices, synthesize_speech
+from pipeline.settings_store import get_pexels_api_key, set_pexels_api_key
+from pipeline.text_to_video import generate_video_from_text
+from pipeline.tts import list_edge_voices, list_local_voices, synthesize_speech
 from pipeline.upscale import upscale
 from pipeline.youtube import download_audio
 
@@ -485,7 +487,7 @@ class TtsJob(BaseModel):
 TTS_JOBS: dict[str, TtsJob] = {}
 
 
-def _run_tts(job_id: str, text: str, rate: int | None, voice_id: str | None) -> None:
+def _run_tts(job_id: str, text: str, engine: str, rate: int | None, voice_id: str | None) -> None:
     job = TTS_JOBS[job_id]
     try:
         job.status = "generating"
@@ -493,7 +495,7 @@ def _run_tts(job_id: str, text: str, rate: int | None, voice_id: str | None) -> 
         job_dir.mkdir(exist_ok=True)
         output_path = job_dir / "voz.wav"
 
-        synthesize_speech(text, output_path, rate=rate, voice_id=voice_id)
+        synthesize_speech(text, output_path, engine=engine, rate=rate, voice_id=voice_id)
 
         job.result_audio = str(output_path)
         job.status = "done"
@@ -509,21 +511,23 @@ class VoiceOption(BaseModel):
 
 
 @app.get("/api/tts/voices")
-async def get_voices() -> list[VoiceOption]:
-    return [VoiceOption(id=v.id, name=v.name, languages=v.languages) for v in list_voices()]
+async def get_voices(engine: str = "local") -> list[VoiceOption]:
+    voices = list_edge_voices() if engine == "edge" else list_local_voices()
+    return [VoiceOption(id=v.id, name=v.name, languages=v.languages) for v in voices]
 
 
 @app.post("/api/tts")
 async def create_tts(
     background_tasks: BackgroundTasks,
     text: str = Form(...),
+    engine: str = Form("local"),
     rate: int = Form(0),
     voice_id: str = Form(""),
 ) -> TtsJob:
     job_id = str(uuid.uuid4())
     job = TtsJob(id=job_id)
     TTS_JOBS[job_id] = job
-    background_tasks.add_task(_run_tts, job_id, text, rate or None, voice_id.strip() or None)
+    background_tasks.add_task(_run_tts, job_id, text, engine, rate or None, voice_id.strip() or None)
     return job
 
 
@@ -536,6 +540,87 @@ async def get_tts(job_id: str) -> TtsJob:
 async def download_tts(job_id: str) -> FileResponse:
     job = TTS_JOBS[job_id]
     return FileResponse(job.result_audio, filename="voz.wav")
+
+
+# --- Configurações locais (chave de API do Pexels) --------------------------
+
+
+class SettingsInfo(BaseModel):
+    has_pexels_key: bool
+
+
+class SettingsUpdate(BaseModel):
+    pexels_api_key: str
+
+
+@app.get("/api/settings")
+async def get_settings() -> SettingsInfo:
+    return SettingsInfo(has_pexels_key=bool(get_pexels_api_key()))
+
+
+@app.post("/api/settings")
+async def update_settings(payload: SettingsUpdate) -> SettingsInfo:
+    set_pexels_api_key(payload.pexels_api_key.strip())
+    return SettingsInfo(has_pexels_key=bool(get_pexels_api_key()))
+
+
+# --- Texto para vídeo (narração + fotos automáticas) ------------------------
+
+TextToVideoStatus = Literal["queued", "generating", "done", "error"]
+
+
+class TextToVideoJob(BaseModel):
+    id: str
+    status: TextToVideoStatus = "queued"
+    error: str | None = None
+    result_video: str | None = None
+
+
+TEXT_TO_VIDEO_JOBS: dict[str, TextToVideoJob] = {}
+
+
+def _run_text_to_video(job_id: str, text: str, engine: str, voice_id: str | None, rate: int | None) -> None:
+    job = TEXT_TO_VIDEO_JOBS[job_id]
+    try:
+        job.status = "generating"
+        job_dir = OUTPUTS_DIR / job_id
+        job_dir.mkdir(exist_ok=True)
+        output_path = job_dir / "video.mp4"
+
+        api_key = get_pexels_api_key() or ""
+        generate_video_from_text(text, output_path, api_key, tts_engine=engine, voice_id=voice_id, rate=rate)
+
+        job.result_video = str(output_path)
+        job.status = "done"
+    except Exception as exc:  # noqa: BLE001
+        job.status = "error"
+        job.error = str(exc)
+
+
+@app.post("/api/text-to-video")
+async def create_text_to_video(
+    background_tasks: BackgroundTasks,
+    text: str = Form(...),
+    engine: str = Form("edge"),
+    voice_id: str = Form(""),
+    rate: int = Form(0),
+) -> TextToVideoJob:
+    job_id = str(uuid.uuid4())
+    job = TextToVideoJob(id=job_id)
+    TEXT_TO_VIDEO_JOBS[job_id] = job
+    background_tasks.add_task(_run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None)
+    return job
+
+
+@app.get("/api/text-to-video/{job_id}")
+async def get_text_to_video(job_id: str) -> TextToVideoJob:
+    return TEXT_TO_VIDEO_JOBS[job_id]
+
+
+@app.get("/api/text-to-video/{job_id}/video")
+async def download_text_to_video(job_id: str) -> FileResponse:
+    job = TEXT_TO_VIDEO_JOBS[job_id]
+    return FileResponse(job.result_video, filename="video.mp4")
 
 
 # --- Frontend ---------------------------------------------------------------

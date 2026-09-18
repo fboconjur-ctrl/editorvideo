@@ -2,6 +2,7 @@ backend/uploads/
 backend/outputs/
 backend/.venv/
 backend/static/
+backend/config.json
 tools/
 __pycache__/
 *.pyc

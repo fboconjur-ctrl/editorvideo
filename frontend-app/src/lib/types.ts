@@ -91,3 +91,18 @@ export interface VoiceOption {
   name: string;
   languages: string[];
 }
+
+export type TtsEngine = "local" | "edge";
+
+export type TextToVideoStatus = "queued" | "generating" | "done" | "error";
+
+export interface TextToVideoJob {
+  id: string;
+  status: TextToVideoStatus;
+  error: string | null;
+  result_video: string | null;
+}
+
+export interface SettingsInfo {
+  has_pexels_key: boolean;
+}

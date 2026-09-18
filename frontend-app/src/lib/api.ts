@@ -8,6 +8,9 @@ import type {
   EdlSegment,
   TextOverlay,
   VoiceOption,
+  TtsEngine,
+  TextToVideoJob,
+  SettingsInfo,
 } from "./types";
 
 // Em produção o app é servido pelo próprio FastAPI (mesma origem), então a
@@ -106,16 +109,17 @@ export function transcriptionSrtUrl(jobId: string): string {
   return `${API_BASE}/api/transcriptions/${jobId}/srt`;
 }
 
-export function createTts(text: string, rate: number, voiceId?: string): Promise<TtsJob> {
+export function createTts(text: string, engine: TtsEngine, rate: number, voiceId?: string): Promise<TtsJob> {
   const formData = new FormData();
   formData.append("text", text);
+  formData.append("engine", engine);
   formData.append("rate", String(rate));
   if (voiceId) formData.append("voice_id", voiceId);
   return request<TtsJob>("/api/tts", { method: "POST", body: formData });
 }
 
-export function getVoices(): Promise<VoiceOption[]> {
-  return request<VoiceOption[]>("/api/tts/voices");
+export function getVoices(engine: TtsEngine): Promise<VoiceOption[]> {
+  return request<VoiceOption[]>(`/api/tts/voices?engine=${engine}`);
 }
 
 export function getTts(jobId: string): Promise<TtsJob> {
@@ -124,4 +128,38 @@ export function getTts(jobId: string): Promise<TtsJob> {
 
 export function ttsAudioUrl(jobId: string): string {
   return `${API_BASE}/api/tts/${jobId}/audio`;
+}
+
+export function getSettings(): Promise<SettingsInfo> {
+  return request<SettingsInfo>("/api/settings");
+}
+
+export function saveSettings(pexelsApiKey: string): Promise<SettingsInfo> {
+  return request<SettingsInfo>("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pexels_api_key: pexelsApiKey }),
+  });
+}
+
+export function createTextToVideo(
+  text: string,
+  engine: TtsEngine,
+  rate: number,
+  voiceId?: string
+): Promise<TextToVideoJob> {
+  const formData = new FormData();
+  formData.append("text", text);
+  formData.append("engine", engine);
+  formData.append("rate", String(rate));
+  if (voiceId) formData.append("voice_id", voiceId);
+  return request<TextToVideoJob>("/api/text-to-video", { method: "POST", body: formData });
+}
+
+export function getTextToVideo(jobId: string): Promise<TextToVideoJob> {
+  return request<TextToVideoJob>(`/api/text-to-video/${jobId}`);
+}
+
+export function textToVideoUrl(jobId: string): string {
+  return `${API_BASE}/api/text-to-video/${jobId}/video`;
 }

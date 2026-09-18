@@ -146,13 +146,23 @@ idealmente rodar em GPU.
   inteiro) e recebe de volta o texto (`.txt`) e a legenda (`.srt`), sem
   mexer no vídeo. Útil pra tirar uma transcrição rápida de uma
   entrevista/reunião/podcast/vídeo do YouTube.
-- **Texto para voz**: gera um áudio narrado a partir de texto digitado,
-  usando `pyttsx3` — no Windows usa as vozes SAPI5 já instaladas no
-  sistema, sem precisar de internet nem baixar modelo. Dá pra escolher
-  entre as vozes disponíveis no seletor da interface; se só aparecer uma
-  opção, é porque o Windows só tem uma voz instalada — mais vozes (outros
-  idiomas/sotaques) podem ser adicionadas em Configurações → Hora e
-  idioma → Fala → Adicionar vozes.
+- **Texto para voz**: gera um áudio narrado, com dois motores à escolha:
+  - **Neural (Edge)**: vozes muito mais naturais (as mesmas do Microsoft
+    Edge), gratuitas e sem precisar de chave de API — mas precisa de
+    internet.
+  - **Local**: `pyttsx3`, usa as vozes já instaladas no sistema
+    operacional (SAPI5 no Windows), 100% offline. Mais vozes (outros
+    idiomas/sotaques) podem ser adicionadas em Configurações → Hora e
+    idioma → Fala → Adicionar vozes.
+- **Texto para vídeo**: gera um vídeo narrado automaticamente a partir de
+  um texto — divide em trechos, narra cada um (mesmo TTS acima) e busca
+  uma foto relacionada a cada trecho no banco gratuito
+  [Pexels](https://www.pexels.com/api/), montando um slideshow com efeito
+  de zoom lento sincronizado com o áudio. Precisa de uma chave de API
+  gratuita do Pexels (a interface pede e guarda localmente em
+  `backend/config.json`, nunca versionado no git). Se a busca de foto não
+  encontrar nada pra um trecho, usa um fundo sólido nesse trecho em vez de
+  travar a geração.
 
 ## Roadmap
 
