@@ -156,13 +156,27 @@ idealmente rodar em GPU.
     idioma → Fala → Adicionar vozes.
 - **Texto para vídeo**: gera um vídeo narrado automaticamente a partir de
   um texto — divide em trechos, narra cada um (mesmo TTS acima) e busca
-  uma foto relacionada a cada trecho no banco gratuito
-  [Pexels](https://www.pexels.com/api/), montando um slideshow com efeito
-  de zoom lento sincronizado com o áudio. Precisa de uma chave de API
-  gratuita do Pexels (a interface pede e guarda localmente em
-  `backend/config.json`, nunca versionado no git). Se a busca de foto não
-  encontrar nada pra um trecho, usa um fundo sólido nesse trecho em vez de
-  travar a geração.
+  uma foto relacionada a cada trecho, montando um slideshow com efeito de
+  zoom lento sincronizado com o áudio. A busca de imagem tem várias
+  camadas, nessa ordem:
+  1. Se o trecho fala de uma instituição brasileira conhecida (STF, TSE,
+     Palácio do Planalto, Congresso Nacional, Polícia Federal, SUS...) ou
+     parece o nome de uma pessoa (ex: um ministro), tenta achar a foto
+     **real** dela na Wikipedia (Wikimedia Commons por trás, uso livre) —
+     evita as fotos genéricas de banco de imagens estrangeiro que não
+     combinam com notícia brasileira.
+  2. Se não achar nada na Wikipedia (ou o tema não tiver instituição
+     específica associada — só um assunto genérico como "dinheiro" ou
+     "eleição"), usa um termo visual genérico em inglês no banco gratuito
+     [Pexels](https://www.pexels.com/api/) (precisa de uma chave de API
+     gratuita — a interface pede e guarda localmente em
+     `backend/config.json`, nunca versionado no git).
+  3. Se nada funcionar, usa um fundo sólido nesse trecho em vez de travar
+     a geração.
+
+  Depois de gerar, um botão "Ver buscas de imagem usadas" mostra
+  exatamente qual busca/fonte foi usada em cada trecho, pra facilitar
+  ajustar se alguma imagem vier estranha.
 
 ## Roadmap
 

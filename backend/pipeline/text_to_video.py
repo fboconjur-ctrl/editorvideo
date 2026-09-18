@@ -21,30 +21,39 @@ MAX_WORDS_PER_CHUNK = 22
 _yake_extractor = yake.KeywordExtractor(lan="pt", n=2, top=3, dedupLim=0.9)
 
 # Bancos de fotos genéricos como o Pexels não têm fotos de políticos
-# específicos nem de conceitos jurídicos/econômicos abstratos — buscar o
-# nome de um ministro ou "Tribunal Superior Eleitoral" ao pé da letra só
-# traz resultado aleatório. Pra conteúdo de notícia (política, justiça,
-# economia, eleições), mapeamos pra termos visuais genéricos em inglês que
-# o banco de fotos realmente tem cobertura.
-_CONCEPT_MAP: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"tribunal|justiça|juiz|ministro|stf|stj|tse|processo jurídico|julgamento", re.I), "courthouse justice gavel"),
-    (re.compile(r"eleiç|eleitoral|candidat|voto|urna|campanha eleitoral", re.I), "election vote ballot"),
-    (re.compile(r"governo|federal|presidente|planalto|ministério|congresso|senado|câmara dos deputados", re.I), "government building"),
-    (re.compile(r"bolsa família|benefício|auxílio|programa social|inss|aposentadoria", re.I), "social welfare family"),
-    (re.compile(r"r\$|reais|bilhõ|milhõ|orçamento|contas públicas|dinheiro|valor mínimo|inflaç|econom", re.I), "money finance"),
-    (re.compile(r"saúde|hospital|médic|sus\b|vacina", re.I), "hospital healthcare"),
-    (re.compile(r"educaç|escola|estudante|universidade|professor", re.I), "school education classroom"),
-    (re.compile(r"polícia|segurança pública|crime|violência", re.I), "police security"),
+# brasileiros nem dos prédios/instituições reais do Brasil — as fotos que
+# ele devolve pra esses temas são de tribunais/prédios de outros países,
+# o que destoa bastante num vídeo sobre notícia brasileira. Por isso, pra
+# cada tema, tentamos primeiro achar a foto REAL da instituição brasileira
+# no Wikipedia (wiki_title) antes de cair pro termo genérico em inglês no
+# Pexels (fallback_query).
+_CONCEPT_MAP: list[tuple[re.Pattern, str | None, str]] = [
+    (re.compile(r"supremo tribunal federal|\bstf\b", re.I), "Supremo Tribunal Federal", "courthouse justice gavel"),
+    (re.compile(r"tribunal superior eleitoral|\btse\b", re.I), "Tribunal Superior Eleitoral", "courthouse justice gavel"),
+    (re.compile(r"tribunal|justiça|juiz|ministro|stj|processo jurídico|julgamento", re.I), None, "courthouse justice gavel"),
+    (re.compile(r"eleiç|eleitoral|candidat|voto|urna|campanha eleitoral", re.I), None, "election vote ballot"),
+    (re.compile(r"congresso nacional|senado federal|câmara dos deputados", re.I), "Congresso Nacional", "government building"),
+    (re.compile(r"planalto|presidência da república", re.I), "Palácio do Planalto", "government building"),
+    (re.compile(r"governo|federal|presidente|ministério", re.I), None, "government building"),
+    (re.compile(r"bolsa família", re.I), "Bolsa Família", "social welfare family"),
+    (re.compile(r"benefício|auxílio|programa social|inss|aposentadoria", re.I), None, "social welfare family"),
+    (re.compile(r"r\$|reais|bilhõ|milhõ|orçamento|contas públicas|dinheiro|valor(es)?\b|reajuste|pagamento|folha (de pagamento|salarial)|salári|inflaç|econom", re.I), None, "money finance"),
+    (re.compile(r"sistema único de saúde|\bsus\b", re.I), "Sistema Único de Saúde", "hospital healthcare"),
+    (re.compile(r"saúde|hospital|médic|vacina", re.I), None, "hospital healthcare"),
+    (re.compile(r"educaç|escola|estudante|universidade|professor", re.I), None, "school education classroom"),
+    (re.compile(r"polícia federal", re.I), "Polícia Federal (Brasil)", "police security"),
+    (re.compile(r"polícia|segurança pública|crime|violência", re.I), None, "police security"),
 ]
 
 
-def concept_query(chunk_text: str) -> str | None:
-    """Se o trecho bater com algum tema de notícia conhecido, devolve um
-    termo de busca genérico e visual em inglês. Retorna None se nada bater
-    (nesse caso o chamador cai pro fluxo normal de extração+tradução)."""
-    for pattern, query in _CONCEPT_MAP:
+def concept_match(chunk_text: str) -> tuple[str | None, str] | None:
+    """Se o trecho bater com algum tema de notícia conhecido, devolve
+    (título pra buscar no Wikipedia ou None, termo genérico de reserva
+    pro Pexels). Retorna None se nada bater (cai pro fluxo normal de
+    extração+tradução)."""
+    for pattern, wiki_title, fallback_query in _CONCEPT_MAP:
         if pattern.search(chunk_text):
-            return query
+            return wiki_title, fallback_query
     return None
 
 
@@ -111,30 +120,34 @@ def split_into_chunks(text: str, max_words: int = MAX_WORDS_PER_CHUNK) -> list[s
     return chunks
 
 
-def build_search_query(chunk_text: str) -> str:
-    """Decide a melhor query de busca pro trecho, em ordem de prioridade:
-    1. Tema de notícia conhecido (política/justiça/economia/etc.) -> termo
-       genérico e visual já em inglês.
-    2. Frase-chave extraída parece nome próprio -> termo genérico de
-       "notícia"/"imprensa" em vez de buscar o nome (não existe no banco).
-    3. Caso normal -> frase-chave extraída (YAKE) traduzida pro inglês.
-    """
-    concept = concept_query(chunk_text)
-    if concept:
-        return concept
+def search_wikipedia_image(title: str) -> bytes | None:
+    """Busca a foto real de uma pessoa/instituição na Wikipedia em
+    português (Wikimedia Commons por trás) — de uso livre, e MUITO mais
+    específica/correta do que um banco de fotos genérico pra política e
+    instituições brasileiras. Retorna None se a página não existir ou não
+    tiver imagem (ex: nome mal escrito, pessoa sem verbete)."""
+    try:
+        resp = requests.get(
+            f"https://pt.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(title)}",
+            timeout=10,
+            headers={"User-Agent": "video-editor-local/1.0 (uso pessoal)"},
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        image_info = data.get("originalimage") or data.get("thumbnail")
+        if not image_info or not image_info.get("source"):
+            return None
+        image_resp = requests.get(
+            image_info["source"], timeout=15, headers={"User-Agent": "video-editor-local/1.0 (uso pessoal)"}
+        )
+        image_resp.raise_for_status()
+        return image_resp.content
+    except requests.RequestException:
+        return None
 
-    keyphrase_pt = extract_keyphrase(chunk_text)
-    if looks_like_proper_name(keyphrase_pt):
-        return "press conference news"
 
-    return translate_to_english(keyphrase_pt)
-
-
-def search_pexels_image(chunk_text: str, api_key: str) -> tuple[bytes | None, str]:
-    """Retorna (bytes da imagem ou None, query usada na busca) — a query é
-    devolvida mesmo em caso de falha, para poder ser registrada num log de
-    diagnóstico."""
-    query = build_search_query(chunk_text)
+def search_pexels_by_query(query: str, api_key: str) -> bytes | None:
     try:
         resp = requests.get(
             "https://api.pexels.com/v1/search",
@@ -145,12 +158,51 @@ def search_pexels_image(chunk_text: str, api_key: str) -> tuple[bytes | None, st
         resp.raise_for_status()
         photos = resp.json().get("photos", [])
         if not photos:
-            return None, query
+            return None
         image_resp = requests.get(photos[0]["src"]["large"], timeout=15)
         image_resp.raise_for_status()
-        return image_resp.content, query
+        return image_resp.content
     except requests.RequestException:
-        return None, query
+        return None
+
+
+def search_pexels_image(chunk_text: str, api_key: str) -> tuple[bytes | None, str]:
+    """Retorna (bytes da imagem, descrição da fonte usada) para o log de
+    diagnóstico. Ordem de prioridade:
+
+    1. Tema de notícia com instituição brasileira conhecida (STF, TSE,
+       Planalto, Congresso...) -> tenta a foto REAL dela no Wikipedia
+       antes de qualquer coisa.
+    2. Frase-chave extraída parece nome de pessoa -> tenta achar essa
+       pessoa no Wikipedia (funciona bem pra ministros/políticos com
+       verbete, ex: "André Mendonça").
+    3. Se o Wikipedia não achar nada (passo 1 ou 2), ou o tema não tiver
+       instituição associada, cai pro termo genérico em inglês no Pexels.
+    4. Caso não seja um tema de notícia reconhecido -> frase-chave
+       (YAKE) traduzida pro inglês, buscada no Pexels normalmente.
+    """
+    match = concept_match(chunk_text)
+    if match:
+        wiki_title, fallback_query = match
+        if wiki_title:
+            image = search_wikipedia_image(wiki_title)
+            if image:
+                return image, f"wikipedia:{wiki_title}"
+        image = search_pexels_by_query(fallback_query, api_key)
+        return image, fallback_query
+
+    keyphrase_pt = extract_keyphrase(chunk_text)
+    if looks_like_proper_name(keyphrase_pt):
+        image = search_wikipedia_image(keyphrase_pt)
+        if image:
+            return image, f"wikipedia:{keyphrase_pt}"
+        fallback_query = "press conference news"
+        image = search_pexels_by_query(fallback_query, api_key)
+        return image, fallback_query
+
+    query = translate_to_english(keyphrase_pt)
+    image = search_pexels_by_query(query, api_key)
+    return image, query
 
 
 def _build_segment_from_image(image_path: Path, audio_path: Path, duration: float, output_path: Path) -> None:
