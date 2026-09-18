@@ -1,10 +1,16 @@
 """Reframe automático para vertical (9:16), seguindo o rosto/pessoa em cena.
 
-Usa MediaPipe (modelo leve, roda local em CPU) para detectar rostos em uma
-amostra de frames, calcula o centro médio horizontal e recorta um "crop"
-vertical fixo centralizado nesse ponto. É um recorte estático (não segue
-movimento frame a frame) — suficiente pra maioria dos vídeos de talking-head,
-e muito mais barato do que rastreamento por frame.
+Usa o detector de rosto Haar Cascade embutido no OpenCV (leve, roda local
+em CPU, sem baixar modelo) para detectar rostos numa amostra de frames,
+calcula o centro médio horizontal e recorta um "crop" vertical fixo
+centralizado nesse ponto. É um recorte estático (não segue movimento
+frame a frame) — suficiente pra maioria dos vídeos de talking-head, e
+muito mais barato do que rastreamento por frame.
+
+O arquivo do detector (haarcascade_frontalface_default.xml) vem
+empacotado direto no projeto em vez de depender do pacote opencv-python
+trazê-lo — versões diferentes do pacote nem sempre incluem esse arquivo,
+e usar uma cópia própria evita esse tipo de instabilidade entre ambientes.
 """
 import json
 import subprocess
@@ -12,28 +18,23 @@ from pathlib import Path
 
 import cv2
 
-
-def _get_face_detection_module():
-    """Import "preguiçoso" do submódulo de detecção de rosto.
-
-    Feito sob demanda (em vez de no topo do arquivo) para que uma falha de
-    import do mediapipe quebre só o recurso de reframe, não o servidor
-    inteiro na inicialização. Em versões recentes do mediapipe o atalho
-    `mediapipe.solutions` nem sempre fica disponível via
-    `import mediapipe as mp; mp.solutions...`, então importamos o
-    submódulo diretamente.
-    """
-    try:
-        from mediapipe.python.solutions import face_detection as mp_face_detection
-        return mp_face_detection
-    except (ImportError, AttributeError) as exc:
-        raise RuntimeError(
-            "Não foi possível carregar o detector de rosto do mediapipe "
-            "(a versão instalada pode ter mudado a API). Tente "
-            "`pip install -U mediapipe` no ambiente virtual do backend."
-        ) from exc
-
 TARGET_ASPECT = 9 / 16
+_CASCADE_PATH = Path(__file__).parent / "data" / "haarcascade_frontalface_default.xml"
+
+_face_cascade: cv2.CascadeClassifier | None = None
+
+
+def _get_face_cascade() -> cv2.CascadeClassifier:
+    global _face_cascade
+    if _face_cascade is None:
+        cascade = cv2.CascadeClassifier(str(_CASCADE_PATH))
+        if cascade.empty():
+            raise RuntimeError(
+                f"Não foi possível carregar o detector de rosto em {_CASCADE_PATH}. "
+                "Verifique se o arquivo não foi corrompido/removido do repositório."
+            )
+        _face_cascade = cascade
+    return _face_cascade
 
 
 def _probe_dimensions(video_path: Path) -> tuple[int, int]:
@@ -55,24 +56,22 @@ def _average_face_center_x(video_path: Path, sample_every_n_frames: int = 15) ->
     """Retorna o centro horizontal médio dos rostos detectados, normalizado
     entre 0 e 1. Retorna None se nenhum rosto for encontrado (nesse caso o
     chamador deve usar o centro geométrico do vídeo)."""
+    cascade = _get_face_cascade()
     cap = cv2.VideoCapture(str(video_path))
     centers: list[float] = []
 
-    mp_face_detection = _get_face_detection_module()
-    with mp_face_detection.FaceDetection(min_detection_confidence=0.5) as detector:
-        frame_index = 0
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            if frame_index % sample_every_n_frames == 0:
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                result = detector.process(rgb_frame)
-                if result.detections:
-                    for detection in result.detections:
-                        box = detection.location_data.relative_bounding_box
-                        centers.append(box.xmin + box.width / 2)
-            frame_index += 1
+    frame_index = 0
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if frame_index % sample_every_n_frames == 0:
+            frame_width = frame.shape[1]
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
+            for x, y, w, h in faces:
+                centers.append((x + w / 2) / frame_width)
+        frame_index += 1
 
     cap.release()
     if not centers:

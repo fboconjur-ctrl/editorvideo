@@ -4,8 +4,7 @@ python-multipart>=0.0.9
 auto-editor>=29.3.1
 faster-whisper>=1.0.3
 rembg>=2.0.68
-mediapipe>=0.10.14
-opencv-python>=4.10.0.84
+opencv-python>=4.10.0.84,<5
 pyttsx3>=2.90
 pywin32>=306; platform_system == "Windows"
 yt-dlp>=2024.10.7

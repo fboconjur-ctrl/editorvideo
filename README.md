@@ -116,10 +116,12 @@ compor sobre uma cor sólida (ex: green screen virtual). O primeiro uso
 baixa o modelo automaticamente (~170MB); depois disso funciona 100%
 offline.
 
-Reframe vertical (opcional): usa `mediapipe` para detectar rostos numa
-amostra de frames, calcula o centro médio e recorta o vídeo em 9:16
-centralizado nesse ponto (recorte estático, não acompanha movimento
-frame a frame). Bom para transformar vídeos horizontais em Reels/Shorts/TikTok.
+Reframe vertical (opcional): usa o detector de rosto Haar Cascade do
+OpenCV (arquivo incluído no próprio repositório, sem depender de pacote
+externo instável) para detectar rostos numa amostra de frames, calcula o
+centro médio e recorta o vídeo em 9:16 centralizado nesse ponto (recorte
+estático, não acompanha movimento frame a frame). Bom para transformar
+vídeos horizontais em Reels/Shorts/TikTok.
 
 Remoção de repetições/vícios de fala (opcional): transcreve o vídeo com
 timestamp por palavra (Whisper), detecta repetições consecutivas
