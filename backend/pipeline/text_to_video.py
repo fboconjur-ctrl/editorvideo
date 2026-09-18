@@ -1,7 +1,8 @@
-"""Gera um vídeo tipo slideshow narrado a partir de um texto: divide o
-texto em trechos, narra cada um (TTS), busca uma foto relacionada no banco
-gratuito Pexels para cada trecho, e monta tudo num vídeo com efeito de
-zoom lento (Ken Burns), sincronizado com o áudio de cada trecho."""
+"""Gera um vídeo narrado a partir de um texto: divide o texto em trechos
+curtos, narra cada um (TTS), e busca uma mídia relacionada pra cada
+trecho — nessa ordem de qualidade: foto real (Wikipedia) > vídeo de banco
+(Pexels) > foto de banco (Pexels) > fundo sólido. Monta tudo com transição
+suave (fade) entre os cortes, sincronizado com o áudio de cada trecho."""
 import re
 import subprocess
 import tempfile
@@ -16,7 +17,14 @@ from .tts import synthesize_speech
 
 RESOLUTION = (1920, 1080)
 FPS = 25
-MAX_WORDS_PER_CHUNK = 22
+FADE_SECONDS = 0.35
+# Trechos menores = mais cortes de imagem/vídeo no resultado final, no
+# ritmo de vídeo de notícia/redes sociais (uma mídia nova a cada poucos
+# segundos, não uma a cada frase longa).
+MAX_WORDS_PER_CHUNK = 12
+# Quantos candidatos pedir por busca — usado pra poder pular os que já
+# foram usados noutro trecho do mesmo vídeo (evita repetir mídia).
+CANDIDATES_PER_SEARCH = 12
 
 _yake_extractor = yake.KeywordExtractor(lan="pt", n=2, top=3, dedupLim=0.9)
 
@@ -147,49 +155,86 @@ def search_wikipedia_image(title: str) -> bytes | None:
         return None
 
 
-def search_pexels_by_query(query: str, api_key: str) -> bytes | None:
+def search_pexels_photo(query: str, api_key: str, used_ids: set[str]) -> bytes | None:
+    """Busca uma foto no Pexels, pulando qualquer resultado já usado
+    noutro trecho do mesmo vídeo (evita repetir a mesma imagem)."""
     try:
         resp = requests.get(
             "https://api.pexels.com/v1/search",
             headers={"Authorization": api_key},
-            params={"query": query[:80], "per_page": 1, "orientation": "landscape"},
+            params={"query": query[:80], "per_page": CANDIDATES_PER_SEARCH, "orientation": "landscape"},
             timeout=15,
         )
         resp.raise_for_status()
-        photos = resp.json().get("photos", [])
-        if not photos:
-            return None
-        image_resp = requests.get(photos[0]["src"]["large"], timeout=15)
-        image_resp.raise_for_status()
-        return image_resp.content
+        for photo in resp.json().get("photos", []):
+            media_id = f"photo:{photo.get('id')}"
+            if media_id in used_ids:
+                continue
+            image_resp = requests.get(photo["src"]["large"], timeout=15)
+            image_resp.raise_for_status()
+            used_ids.add(media_id)
+            return image_resp.content
+        return None
     except requests.RequestException:
         return None
 
 
-def search_pexels_image(chunk_text: str, api_key: str) -> tuple[bytes | None, str]:
-    """Retorna (bytes da imagem, descrição da fonte usada) para o log de
-    diagnóstico. Ordem de prioridade:
+def search_pexels_video(query: str, api_key: str, used_ids: set[str]) -> bytes | None:
+    """Busca um vídeo curto no Pexels (b-roll real, com movimento) — mais
+    dinâmico e profissional do que zoom numa foto parada. Pula vídeos já
+    usados noutro trecho."""
+    try:
+        resp = requests.get(
+            "https://api.pexels.com/videos/search",
+            headers={"Authorization": api_key},
+            params={"query": query[:80], "per_page": CANDIDATES_PER_SEARCH, "orientation": "landscape"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        for video in resp.json().get("videos", []):
+            media_id = f"video:{video.get('id')}"
+            if media_id in used_ids:
+                continue
+            files = [f for f in video.get("video_files", []) if f.get("width") and f.get("link")]
+            if not files:
+                continue
+            files.sort(key=lambda f: abs(f["width"] - RESOLUTION[0]))
+            video_resp = requests.get(files[0]["link"], timeout=30)
+            video_resp.raise_for_status()
+            used_ids.add(media_id)
+            return video_resp.content
+        return None
+    except requests.RequestException:
+        return None
 
+
+def resolve_media_for_chunk(
+    chunk_text: str, api_key: str, used_ids: set[str]
+) -> tuple[str, bytes | None, str]:
+    """Decide e busca a melhor mídia pro trecho. Retorna (tipo, bytes,
+    descrição da fonte pro log de diagnóstico), onde tipo é "photo",
+    "video" ou "color" (fundo sólido, usado quando nada é encontrado).
+
+    Ordem de prioridade:
     1. Frase-chave extraída parece nome de pessoa -> tenta achar ESSA
        pessoa no Wikipedia primeiro (ex: "André Mendonça"). Isso vem antes
        do passo 2 de propósito: um trecho tipo "o ministro André Mendonça
        decidiu..." bate tanto com "nome de pessoa" quanto com o tema
        genérico "ministro/tribunal" — e a foto da pessoa específica é
        sempre mais relevante do que o conceito genérico da instituição.
-    2. Se não for nome de pessoa (ou o Wikipedia não achar essa pessoa),
-       tema de notícia com instituição brasileira conhecida (STF, TSE,
+    2. Tema de notícia com instituição brasileira conhecida (STF, TSE,
        Planalto, Congresso...) -> tenta a foto REAL dela no Wikipedia.
-    3. Se o Wikipedia não achar nada nos passos 1-2, ou o tema não tiver
-       instituição associada, cai pro termo genérico em inglês no Pexels.
-    4. Caso não seja um tema de notícia reconhecido -> frase-chave
-       (YAKE) traduzida pro inglês, buscada no Pexels normalmente.
+    3. Define a query de busca (genérica do tema, ou frase-chave
+       traduzida) e tenta um VÍDEO no Pexels primeiro (mais dinâmico),
+       depois uma FOTO no Pexels.
+    4. Se nada for encontrado, fundo sólido.
     """
     keyphrase_pt = extract_keyphrase(chunk_text)
 
     if looks_like_proper_name(keyphrase_pt):
         image = search_wikipedia_image(keyphrase_pt)
         if image:
-            return image, f"wikipedia:{keyphrase_pt}"
+            return "photo", image, f"wikipedia:{keyphrase_pt}"
 
     match = concept_match(chunk_text)
     if match:
@@ -197,25 +242,36 @@ def search_pexels_image(chunk_text: str, api_key: str) -> tuple[bytes | None, st
         if wiki_title:
             image = search_wikipedia_image(wiki_title)
             if image:
-                return image, f"wikipedia:{wiki_title}"
-        image = search_pexels_by_query(fallback_query, api_key)
-        return image, fallback_query
+                return "photo", image, f"wikipedia:{wiki_title}"
+        query = fallback_query
+    elif looks_like_proper_name(keyphrase_pt):
+        query = "press conference news"
+    else:
+        query = translate_to_english(keyphrase_pt)
 
-    if looks_like_proper_name(keyphrase_pt):
-        fallback_query = "press conference news"
-        image = search_pexels_by_query(fallback_query, api_key)
-        return image, fallback_query
+    if api_key:
+        video = search_pexels_video(query, api_key, used_ids)
+        if video:
+            return "video", video, f"pexels-video:{query}"
+        photo = search_pexels_photo(query, api_key, used_ids)
+        if photo:
+            return "photo", photo, f"pexels-photo:{query}"
 
-    query = translate_to_english(keyphrase_pt)
-    image = search_pexels_by_query(query, api_key)
-    return image, query
+    return "color", None, query
+
+
+def _fade_filter(duration: float) -> str:
+    fade = min(FADE_SECONDS, duration / 2)
+    fade_out_start = max(0.0, duration - fade)
+    return f"fade=t=in:st=0:d={fade:.3f},fade=t=out:st={fade_out_start:.3f}:d={fade:.3f}"
 
 
 def _build_segment_from_image(image_path: Path, audio_path: Path, duration: float, output_path: Path) -> None:
     w, h = RESOLUTION
     vf = (
         f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
-        f"zoompan=z='min(zoom+0.0008,1.08)':d={int(duration * FPS)}:s={w}x{h}:fps={FPS}"
+        f"zoompan=z='min(zoom+0.0008,1.08)':d={int(duration * FPS)}:s={w}x{h}:fps={FPS},"
+        f"{_fade_filter(duration)}"
     )
     cmd = [
         "ffmpeg", "-y",
@@ -231,14 +287,32 @@ def _build_segment_from_image(image_path: Path, audio_path: Path, duration: floa
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+def _build_segment_from_video(video_path: Path, audio_path: Path, duration: float, output_path: Path) -> None:
+    w, h = RESOLUTION
+    vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},{_fade_filter(duration)}"
+    cmd = [
+        "ffmpeg", "-y",
+        "-stream_loop", "-1", "-i", str(video_path),
+        "-i", str(audio_path),
+        "-vf", vf,
+        "-t", f"{duration:.3f}",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-shortest",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
 def _build_segment_solid_color(audio_path: Path, duration: float, output_path: Path) -> None:
-    """Usado quando nenhuma foto relacionada foi encontrada — fundo sólido
-    em vez de travar a geração do vídeo."""
+    """Usado quando nenhuma mídia relacionada foi encontrada — fundo
+    sólido em vez de travar a geração do vídeo."""
     w, h = RESOLUTION
     cmd = [
         "ffmpeg", "-y",
         "-f", "lavfi", "-i", f"color=c=0x1d1f27:s={w}x{h}:d={duration:.3f}",
         "-i", str(audio_path),
+        "-vf", _fade_filter(duration),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-shortest",
@@ -260,6 +334,7 @@ def generate_video_from_text(
         raise ValueError("Texto vazio.")
 
     query_log_lines = []
+    used_media_ids: set[str] = set()
 
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
@@ -271,13 +346,16 @@ def generate_video_from_text(
             duration = probe_duration(audio_path)
 
             segment_path = tmp / f"segment_{i}.mp4"
-            image_bytes, used_query = (
-                search_pexels_image(chunk, pexels_api_key) if pexels_api_key else (None, "")
-            )
-            query_log_lines.append(f"[{i}] busca=\"{used_query}\" | trecho=\"{chunk}\"")
-            if image_bytes:
-                image_path = tmp / f"image_{i}.jpg"
-                image_path.write_bytes(image_bytes)
+            media_type, media_bytes, source_desc = resolve_media_for_chunk(chunk, pexels_api_key, used_media_ids)
+            query_log_lines.append(f"[{i}] fonte=\"{source_desc}\" ({media_type}) | trecho=\"{chunk}\"")
+
+            if media_type == "video" and media_bytes:
+                video_path = tmp / f"media_{i}.mp4"
+                video_path.write_bytes(media_bytes)
+                _build_segment_from_video(video_path, audio_path, duration, segment_path)
+            elif media_type == "photo" and media_bytes:
+                image_path = tmp / f"media_{i}.jpg"
+                image_path.write_bytes(media_bytes)
                 _build_segment_from_image(image_path, audio_path, duration, segment_path)
             else:
                 _build_segment_solid_color(audio_path, duration, segment_path)

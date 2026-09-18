@@ -155,10 +155,11 @@ idealmente rodar em GPU.
     idiomas/sotaques) podem ser adicionadas em Configurações → Hora e
     idioma → Fala → Adicionar vozes.
 - **Texto para vídeo**: gera um vídeo narrado automaticamente a partir de
-  um texto — divide em trechos, narra cada um (mesmo TTS acima) e busca
-  uma foto relacionada a cada trecho, montando um slideshow com efeito de
-  zoom lento sincronizado com o áudio. A busca de imagem tem várias
-  camadas, nessa ordem:
+  um texto — divide em trechos curtos (uma mídia nova a cada poucos
+  segundos, no ritmo de vídeo de notícia/redes sociais), narra cada um
+  (mesmo TTS acima) e busca uma mídia relacionada pra cada trecho,
+  juntando tudo com transição suave (fade) entre os cortes. A busca de
+  mídia tem várias camadas, nessa ordem:
   1. Se o trecho fala de uma instituição brasileira conhecida (STF, TSE,
      Palácio do Planalto, Congresso Nacional, Polícia Federal, SUS...) ou
      parece o nome de uma pessoa (ex: um ministro), tenta achar a foto
@@ -167,16 +168,21 @@ idealmente rodar em GPU.
      combinam com notícia brasileira.
   2. Se não achar nada na Wikipedia (ou o tema não tiver instituição
      específica associada — só um assunto genérico como "dinheiro" ou
-     "eleição"), usa um termo visual genérico em inglês no banco gratuito
-     [Pexels](https://www.pexels.com/api/) (precisa de uma chave de API
-     gratuita — a interface pede e guarda localmente em
-     `backend/config.json`, nunca versionado no git).
+     "eleição"), tenta um **vídeo curto** (b-roll real, com movimento —
+     mais dinâmico que uma foto parada) no banco gratuito
+     [Pexels](https://www.pexels.com/api/), e se não achar vídeo, uma
+     foto. Precisa de uma chave de API gratuita do Pexels — a interface
+     pede e guarda localmente em `backend/config.json`, nunca versionado
+     no git.
   3. Se nada funcionar, usa um fundo sólido nesse trecho em vez de travar
      a geração.
 
+  Nenhuma foto/vídeo do Pexels se repete dentro do mesmo vídeo gerado —
+  cada busca pula os resultados já usados noutro trecho.
+
   Depois de gerar, um botão "Ver buscas de imagem usadas" mostra
   exatamente qual busca/fonte foi usada em cada trecho, pra facilitar
-  ajustar se alguma imagem vier estranha.
+  ajustar se alguma mídia vier estranha.
 - **Separar por quem fala** (opcional, na transcrição): identifica cada
   pessoa distinta na gravação (`[Pessoa 1]`, `[Pessoa 2]`...), usando
   `pyannote.audio`. Precisa de um token gratuito do Hugging Face — a
