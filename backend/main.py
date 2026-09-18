@@ -638,6 +638,9 @@ def _run_text_to_video(
     voice_id: str | None,
     rate: int | None,
     manual_image_map: dict[int, Path] | None,
+    subtitles_enabled: bool,
+    subtitle_font_size: int | None,
+    subtitle_position: str,
 ) -> None:
     job = TEXT_TO_VIDEO_JOBS[job_id]
     try:
@@ -650,6 +653,9 @@ def _run_text_to_video(
         generate_video_from_text(
             text, output_path, api_key, tts_engine=engine, voice_id=voice_id, rate=rate,
             manual_image_map=manual_image_map,
+            subtitles_enabled=subtitles_enabled,
+            subtitle_font_size=subtitle_font_size,
+            subtitle_position=subtitle_position,
         )
 
         log_path = job_dir / "buscas_de_imagem.log.txt"
@@ -670,6 +676,9 @@ async def create_text_to_video(
     rate: int = Form(0),
     manual_images: list[UploadFile] = File(default=[]),
     chunk_assignments: str = Form(""),
+    subtitles_enabled: bool = Form(False),
+    subtitle_font_size: int = Form(0),
+    subtitle_position: str = Form("bottom"),
 ) -> TextToVideoJob:
     """`chunk_assignments`: JSON com uma lista do mesmo tamanho dos trechos
     do texto, onde cada item é o índice (dentro de `manual_images`) da
@@ -702,6 +711,7 @@ async def create_text_to_video(
     TEXT_TO_VIDEO_JOBS[job_id] = job
     background_tasks.add_task(
         _run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None, manual_image_map,
+        subtitles_enabled, subtitle_font_size or None, subtitle_position,
     )
     return job
 

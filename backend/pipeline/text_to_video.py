@@ -13,6 +13,8 @@ import yake
 from deep_translator import GoogleTranslator
 
 from .ffprobe_utils import probe_duration
+from .subtitles import burn_subtitles, write_srt
+from .transcribe import Segment
 from .tts import synthesize_speech
 
 RESOLUTION = (1920, 1080)
@@ -388,13 +390,20 @@ def generate_video_from_text(
     voice_id: str | None = None,
     rate: int | None = None,
     manual_image_map: dict[int, Path] | None = None,
+    subtitles_enabled: bool = False,
+    subtitle_font_size: int | None = None,
+    subtitle_position: str = "bottom",
 ) -> None:
     """`manual_image_map`: mapa opcional {índice do trecho: caminho da
     imagem} para os trechos onde o usuário escolheu manualmente uma foto
     (porque a busca automática às vezes traz fotos artificiais/genéricas
     demais pro tema). Um trecho sem entrada no mapa cai na busca
     automática normal — dá pra misturar os dois num mesmo vídeo, em vez
-    de ser tudo automático ou tudo manual."""
+    de ser tudo automático ou tudo manual.
+
+    `subtitles_enabled`: queima o próprio texto da narração como legenda,
+    sincronizado com a duração real de cada trecho narrado — não precisa
+    transcrever de novo (já sabemos exatamente o texto de cada trecho)."""
     chunks = split_into_chunks(text)
     if not chunks:
         raise ValueError("Texto vazio.")
@@ -402,6 +411,8 @@ def generate_video_from_text(
     manual_image_map = manual_image_map or {}
     query_log_lines = []
     used_media_ids: set[str] = set()
+    subtitle_segments: list[Segment] = []
+    elapsed = 0.0
 
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
@@ -411,6 +422,8 @@ def generate_video_from_text(
             audio_path = tmp / f"audio_{i}.mp3"
             synthesize_speech(chunk, audio_path, engine=tts_engine, voice_id=voice_id, rate=rate)
             duration = probe_duration(audio_path)
+            subtitle_segments.append(Segment(start=elapsed, end=elapsed + duration, text=chunk))
+            elapsed += duration
 
             segment_path = tmp / f"segment_{i}.mp4"
 
@@ -441,13 +454,22 @@ def generate_video_from_text(
             "\n".join(f"file '{p.as_posix()}'" for p in segment_paths), encoding="utf-8"
         )
 
+        concat_output = tmp / "concat_output.mp4" if subtitles_enabled else output_path
         cmd = [
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0", "-i", str(concat_list),
             "-c", "copy",
-            str(output_path),
+            str(concat_output),
         ]
         subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+        if subtitles_enabled:
+            srt_path = tmp / "legendas.srt"
+            write_srt(subtitle_segments, srt_path)
+            burn_subtitles(
+                concat_output, srt_path, output_path,
+                font_size=subtitle_font_size, position=subtitle_position,
+            )
 
     log_path = output_path.parent / "buscas_de_imagem.log.txt"
     log_path.write_text("\n".join(query_log_lines), encoding="utf-8")

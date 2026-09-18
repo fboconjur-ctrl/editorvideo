@@ -162,7 +162,8 @@ export function createTextToVideo(
   rate: number,
   voiceId?: string,
   manualImages?: File[],
-  chunkAssignments?: (number | null)[]
+  chunkAssignments?: (number | null)[],
+  subtitlesEnabled?: boolean
 ): Promise<TextToVideoJob> {
   const formData = new FormData();
   formData.append("text", text);
@@ -174,6 +175,9 @@ export function createTextToVideo(
   }
   if (chunkAssignments) {
     formData.append("chunk_assignments", JSON.stringify(chunkAssignments));
+  }
+  if (subtitlesEnabled) {
+    formData.append("subtitles_enabled", "true");
   }
   return request<TextToVideoJob>("/api/text-to-video", { method: "POST", body: formData });
 }

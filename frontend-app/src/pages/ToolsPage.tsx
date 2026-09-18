@@ -365,6 +365,7 @@ function TextToVideoCard() {
   const [chunks, setChunks] = useState<string[] | null>(null);
   const [assignments, setAssignments] = useState<(number | null)[]>([]);
   const [loadingChunks, setLoadingChunks] = useState(false);
+  const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
 
   useEffect(() => {
     api
@@ -444,7 +445,8 @@ function TextToVideoCard() {
         Number(rate) || 0,
         selection.voiceId || undefined,
         manualImages,
-        chunks ? assignments : undefined
+        chunks ? assignments : undefined,
+        subtitlesEnabled
       );
       await poll(job.id);
     } catch (err) {
@@ -587,6 +589,15 @@ function TextToVideoCard() {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="mt-3">
+        <Toggle
+          checked={subtitlesEnabled}
+          onChange={setSubtitlesEnabled}
+          label="Queimar legenda no vídeo"
+          description="Usa o próprio texto da narração como legenda, sincronizada com o áudio de cada trecho"
+        />
       </div>
 
       <Button className="mt-4" onClick={handleGenerate} disabled={!text.trim() || busy}>
