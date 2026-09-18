@@ -2,8 +2,19 @@
 <html lang="pt-br" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Video Editor Local</title>
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0a0b0d" />
+
+    <!-- "Adicionar à Tela de Início" no iPhone/iPad: o Safari não lê o
+         manifest.webmanifest pra isso, precisa dessas meta tags e do
+         apple-touch-icon separados. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Video Editor" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
   </head>
   <body class="bg-base-950 text-slate-100 antialiased">
     <div id="root"></div>
