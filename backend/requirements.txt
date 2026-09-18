@@ -13,3 +13,4 @@ edge-tts>=6.1.19
 requests>=2.32.0
 deep-translator>=1.11.4
 yake>=0.4.8
+pyannote.audio>=3.3.0

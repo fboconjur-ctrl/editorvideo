@@ -1,5 +1,6 @@
-"""Armazenamento simples de configurações locais (ex: chave de API do
-Pexels), num arquivo JSON na pasta do backend — nunca versionado no git."""
+"""Armazenamento simples de configurações locais (chaves de API de
+serviços gratuitos usados pelo app), num arquivo JSON na pasta do
+backend — nunca versionado no git."""
 import json
 from pathlib import Path
 
@@ -12,6 +13,10 @@ def _read() -> dict:
     return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
+def _write(data: dict) -> None:
+    CONFIG_PATH.write_text(json.dumps(data), encoding="utf-8")
+
+
 def get_pexels_api_key() -> str | None:
     return _read().get("pexels_api_key") or None
 
@@ -19,4 +24,14 @@ def get_pexels_api_key() -> str | None:
 def set_pexels_api_key(api_key: str) -> None:
     data = _read()
     data["pexels_api_key"] = api_key
-    CONFIG_PATH.write_text(json.dumps(data), encoding="utf-8")
+    _write(data)
+
+
+def get_huggingface_token() -> str | None:
+    return _read().get("huggingface_token") or None
+
+
+def set_huggingface_token(token: str) -> None:
+    data = _read()
+    data["huggingface_token"] = token
+    _write(data)

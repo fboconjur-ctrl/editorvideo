@@ -170,17 +170,27 @@ def search_pexels_image(chunk_text: str, api_key: str) -> tuple[bytes | None, st
     """Retorna (bytes da imagem, descrição da fonte usada) para o log de
     diagnóstico. Ordem de prioridade:
 
-    1. Tema de notícia com instituição brasileira conhecida (STF, TSE,
-       Planalto, Congresso...) -> tenta a foto REAL dela no Wikipedia
-       antes de qualquer coisa.
-    2. Frase-chave extraída parece nome de pessoa -> tenta achar essa
-       pessoa no Wikipedia (funciona bem pra ministros/políticos com
-       verbete, ex: "André Mendonça").
-    3. Se o Wikipedia não achar nada (passo 1 ou 2), ou o tema não tiver
+    1. Frase-chave extraída parece nome de pessoa -> tenta achar ESSA
+       pessoa no Wikipedia primeiro (ex: "André Mendonça"). Isso vem antes
+       do passo 2 de propósito: um trecho tipo "o ministro André Mendonça
+       decidiu..." bate tanto com "nome de pessoa" quanto com o tema
+       genérico "ministro/tribunal" — e a foto da pessoa específica é
+       sempre mais relevante do que o conceito genérico da instituição.
+    2. Se não for nome de pessoa (ou o Wikipedia não achar essa pessoa),
+       tema de notícia com instituição brasileira conhecida (STF, TSE,
+       Planalto, Congresso...) -> tenta a foto REAL dela no Wikipedia.
+    3. Se o Wikipedia não achar nada nos passos 1-2, ou o tema não tiver
        instituição associada, cai pro termo genérico em inglês no Pexels.
     4. Caso não seja um tema de notícia reconhecido -> frase-chave
        (YAKE) traduzida pro inglês, buscada no Pexels normalmente.
     """
+    keyphrase_pt = extract_keyphrase(chunk_text)
+
+    if looks_like_proper_name(keyphrase_pt):
+        image = search_wikipedia_image(keyphrase_pt)
+        if image:
+            return image, f"wikipedia:{keyphrase_pt}"
+
     match = concept_match(chunk_text)
     if match:
         wiki_title, fallback_query = match
@@ -191,11 +201,7 @@ def search_pexels_image(chunk_text: str, api_key: str) -> tuple[bytes | None, st
         image = search_pexels_by_query(fallback_query, api_key)
         return image, fallback_query
 
-    keyphrase_pt = extract_keyphrase(chunk_text)
     if looks_like_proper_name(keyphrase_pt):
-        image = search_wikipedia_image(keyphrase_pt)
-        if image:
-            return image, f"wikipedia:{keyphrase_pt}"
         fallback_query = "press conference news"
         image = search_pexels_by_query(fallback_query, api_key)
         return image, fallback_query
