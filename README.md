@@ -49,10 +49,21 @@ cd ../backend
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Abra `http://localhost:8000` no navegador.
+Abra `http://localhost:8000` no navegador. `--host 0.0.0.0` também permite acessar de outros
+aparelhos na mesma rede (ex: celular/tablet via [Tailscale](https://tailscale.com), veja a
+seção "Acesso remoto" abaixo) — sem isso o servidor só aceita conexões do próprio PC.
+
+## Acesso remoto (celular, tablet, outro computador)
+
+O processamento roda no seu PC, mas dá pra acessar a interface de outros aparelhos seus
+usando o [Tailscale](https://tailscale.com) (grátis): instale em todos os aparelhos, faça
+login com a mesma conta em cada um, e acesse `http://<ip-tailscale-do-pc>:8000` (o IP
+aparece no app do Tailscale ou em https://login.tailscale.com/admin/machines). No
+iPhone/iPad, abra esse endereço no Safari e toque em "Adicionar à Tela de Início" — o app
+já é uma PWA instalável (ícone próprio, tela cheia, sem barra de navegador).
 
 ### Desenvolvendo a interface (hot-reload)
 

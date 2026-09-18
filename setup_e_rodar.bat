@@ -128,6 +128,8 @@ REM Abre o navegador em segundo plano, com um pequeno atraso, para dar
 REM tempo do servidor subir antes da pagina carregar.
 start "" /min cmd /c "timeout /t 3 /nobreak >nul & start http://localhost:8000"
 
-uvicorn main:app --reload --port 8000
+REM --host 0.0.0.0 faz o servidor aceitar conexoes de outros aparelhos na
+REM rede (ex: celular/tablet via Tailscale), nao so do proprio PC.
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 pause
