@@ -167,7 +167,9 @@ export function createTextToVideo(
   orientation?: "horizontal" | "vertical",
   coverImage?: File | null,
   useIntro?: boolean,
-  useOutro?: boolean
+  useOutro?: boolean,
+  useWebcam?: boolean,
+  webcamPosition?: WebcamPosition
 ): Promise<TextToVideoJob> {
   const formData = new FormData();
   formData.append("text", text);
@@ -189,6 +191,8 @@ export function createTextToVideo(
   }
   formData.append("use_intro", String(useIntro ?? true));
   formData.append("use_outro", String(useOutro ?? true));
+  formData.append("use_webcam", String(useWebcam ?? true));
+  formData.append("webcam_position", webcamPosition ?? "bottom-right");
   return request<TextToVideoJob>("/api/text-to-video", { method: "POST", body: formData });
 }
 
@@ -196,23 +200,31 @@ export function textToVideoThumbnailUrl(jobId: string): string {
   return `${API_BASE}/api/text-to-video/${jobId}/thumbnail`;
 }
 
+export type WebcamPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left";
+
 export interface BumperStatus {
   has_intro: boolean;
   has_outro: boolean;
+  has_webcam: boolean;
 }
 
 export function getBumpersStatus(): Promise<BumperStatus> {
   return request<BumperStatus>("/api/text-to-video/bumpers");
 }
 
-export function uploadBumpers(introVideo?: File | null, outroVideo?: File | null): Promise<BumperStatus> {
+export function uploadBumpers(
+  introVideo?: File | null,
+  outroVideo?: File | null,
+  webcamVideo?: File | null
+): Promise<BumperStatus> {
   const formData = new FormData();
   if (introVideo) formData.append("intro_video", introVideo);
   if (outroVideo) formData.append("outro_video", outroVideo);
+  if (webcamVideo) formData.append("webcam_video", webcamVideo);
   return request<BumperStatus>("/api/text-to-video/bumpers", { method: "POST", body: formData });
 }
 
-export function deleteBumper(which: "intro" | "outro"): Promise<BumperStatus> {
+export function deleteBumper(which: "intro" | "outro" | "webcam"): Promise<BumperStatus> {
   return request<BumperStatus>(`/api/text-to-video/bumpers/${which}`, { method: "DELETE" });
 }
 

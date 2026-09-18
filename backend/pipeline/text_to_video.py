@@ -4,6 +4,7 @@ trecho — nessa ordem de qualidade: foto real (Wikipedia) > vídeo de banco
 (Pexels) > foto de banco (Pexels) > fundo sólido. Monta tudo com transição
 suave (fade) entre os cortes, sincronizado com o áudio de cada trecho."""
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -447,6 +448,52 @@ def build_bumper_from_video(
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+_WEBCAM_OVERLAY_POSITIONS = {
+    "bottom-right": "x=W-w-{margin}:y=H-h-{margin}",
+    "bottom-left": "x={margin}:y=H-h-{margin}",
+    "top-right": "x=W-w-{margin}:y={margin}",
+    "top-left": "x={margin}:y={margin}",
+}
+
+
+def apply_webcam_overlay(
+    base_video_path: Path,
+    webcam_video_path: Path,
+    output_path: Path,
+    resolution: tuple[int, int] = HORIZONTAL_RESOLUTION,
+    position: str = "bottom-right",
+    size_ratio: float = 0.28,
+) -> None:
+    """Sobrepõe um vídeo próprio (sem narração — ex: o usuário reagindo em
+    silêncio) num canto do vídeo, durante todo o conteúdo. Se o clipe da
+    webcam for mais curto que o conteúdo, repete em loop; se for mais
+    longo, corta no fim do conteúdo (`shortest=1`). O áudio do vídeo base
+    (a narração) é preservado sem alteração — o áudio da webcam, se
+    houver, é descartado."""
+    w, _h = resolution
+    overlay_width = round(w * size_ratio)
+    margin = round(w * 0.02)
+    pos_template = _WEBCAM_OVERLAY_POSITIONS.get(position, _WEBCAM_OVERLAY_POSITIONS["bottom-right"])
+    overlay_pos = pos_template.format(margin=margin)
+
+    filter_complex = (
+        f"[1:v]scale={overlay_width}:-2,setsar=1[wc];"
+        f"[0:v][wc]overlay={overlay_pos}:shortest=1[v]"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(base_video_path),
+        "-stream_loop", "-1", "-i", str(webcam_video_path),
+        "-filter_complex", filter_complex,
+        "-map", "[v]", "-map", "0:a?",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-shortest",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
 def build_cover_thumbnail(
     image_path: Path, output_path: Path, resolution: tuple[int, int] = HORIZONTAL_RESOLUTION
 ) -> None:
@@ -482,6 +529,8 @@ def generate_video_from_text(
     orientation: str = "horizontal",
     intro_video_path: Path | None = None,
     outro_video_path: Path | None = None,
+    webcam_video_path: Path | None = None,
+    webcam_position: str = "bottom-right",
 ) -> None:
     """`manual_image_map`: mapa opcional {índice do trecho: caminho da
     imagem} para os trechos onde o usuário escolheu manualmente uma foto
@@ -500,7 +549,14 @@ def generate_video_from_text(
 
     `intro_video_path`/`outro_video_path`: vídeos próprios (ex: o usuário
     aparecendo) pra colar no início/fim do vídeo gerado — não recebem
-    legenda automática (são conteúdo próprio, já pronto)."""
+    legenda automática nem a camada de webcam (são conteúdo próprio, já
+    pronto).
+
+    `webcam_video_path`: vídeo próprio SEM narração (ex: o usuário
+    reagindo/acompanhando em silêncio) pra sobrepor num canto da tela
+    durante o conteúdo narrado (não durante abertura/encerramento) — dá
+    uma camada humana/autoral ao vídeo, importante pra não parecer 100%
+    automatizado. Repete em loop se for mais curto que o conteúdo."""
     chunks = split_into_chunks(text)
     if not chunks:
         raise ValueError("Texto vazio.")
@@ -511,22 +567,11 @@ def generate_video_from_text(
     query_log_lines = []
     used_media_ids: set[str] = set()
     subtitle_segments: list[Segment] = []
+    elapsed = 0.0
 
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
-        segment_paths = []
-
-        intro_segment_path = None
-        if intro_video_path:
-            intro_segment_path = tmp / "intro.mp4"
-            build_bumper_from_video(intro_video_path, intro_segment_path, resolution=resolution)
-            segment_paths.append(intro_segment_path)
-
-        # As legendas só começam a contar depois da abertura (ela não tem
-        # legenda automática — é conteúdo próprio já pronto), senão o
-        # tempo dos cues ficaria dessincronizado da narração real no
-        # vídeo final concatenado.
-        elapsed = probe_duration(intro_segment_path) if intro_segment_path else 0.0
+        content_segment_paths = []
 
         for i, chunk in enumerate(chunks):
             audio_path = tmp / f"audio_{i}.mp3"
@@ -557,33 +602,62 @@ def generate_video_from_text(
             else:
                 _build_segment_solid_color(audio_path, duration, segment_path, resolution=resolution)
 
-            segment_paths.append(segment_path)
+            content_segment_paths.append(segment_path)
 
-        if outro_video_path:
-            outro_segment_path = tmp / "outro.mp4"
-            build_bumper_from_video(outro_video_path, outro_segment_path, resolution=resolution)
-            segment_paths.append(outro_segment_path)
-
-        concat_list = tmp / "concat.txt"
-        concat_list.write_text(
-            "\n".join(f"file '{p.as_posix()}'" for p in segment_paths), encoding="utf-8"
+        # Concatena só o conteúdo narrado (sem abertura/encerramento) —
+        # legendas e a camada de webcam se aplicam só a essa parte.
+        content_concat = tmp / "content_concat.mp4"
+        content_list = tmp / "content_concat.txt"
+        content_list.write_text(
+            "\n".join(f"file '{p.as_posix()}'" for p in content_segment_paths), encoding="utf-8"
         )
-
-        concat_output = tmp / "concat_output.mp4" if subtitles_enabled else output_path
-        cmd = [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0", "-i", str(concat_list),
-            "-c", "copy",
-            str(concat_output),
-        ]
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(content_list), "-c", "copy", str(content_concat)],
+            check=True, capture_output=True, text=True,
+        )
+        content_current = content_concat
 
         if subtitles_enabled:
             srt_path = tmp / "legendas.srt"
             write_srt(subtitle_segments, srt_path)
+            content_with_subs = tmp / "content_with_subs.mp4"
             burn_subtitles(
-                concat_output, srt_path, output_path,
+                content_current, srt_path, content_with_subs,
                 font_size=subtitle_font_size, position=subtitle_position,
+            )
+            content_current = content_with_subs
+
+        if webcam_video_path:
+            content_with_webcam = tmp / "content_with_webcam.mp4"
+            apply_webcam_overlay(
+                content_current, webcam_video_path, content_with_webcam,
+                resolution=resolution, position=webcam_position,
+            )
+            content_current = content_with_webcam
+
+        final_segment_paths = []
+        if intro_video_path:
+            intro_segment_path = tmp / "intro.mp4"
+            build_bumper_from_video(intro_video_path, intro_segment_path, resolution=resolution)
+            final_segment_paths.append(intro_segment_path)
+
+        final_segment_paths.append(content_current)
+
+        if outro_video_path:
+            outro_segment_path = tmp / "outro.mp4"
+            build_bumper_from_video(outro_video_path, outro_segment_path, resolution=resolution)
+            final_segment_paths.append(outro_segment_path)
+
+        if len(final_segment_paths) == 1:
+            shutil.copy(content_current, output_path)
+        else:
+            final_list = tmp / "final_concat.txt"
+            final_list.write_text(
+                "\n".join(f"file '{p.as_posix()}'" for p in final_segment_paths), encoding="utf-8"
+            )
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(final_list), "-c", "copy", str(output_path)],
+                check=True, capture_output=True, text=True,
             )
 
     log_path = output_path.parent / "buscas_de_imagem.log.txt"

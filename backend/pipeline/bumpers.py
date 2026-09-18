@@ -1,6 +1,6 @@
-"""Armazenamento dos vídeos de abertura/encerramento (bumpers) que o
-usuário sobe uma vez e reaproveita em todo texto-para-vídeo gerado depois
-— sem precisar subir de novo a cada geração."""
+"""Armazenamento dos vídeos próprios reaproveitáveis no texto-para-vídeo
+— abertura, encerramento e a camada de webcam/reação — que o usuário sobe
+uma vez e usa em toda geração depois, sem precisar subir de novo."""
 import shutil
 from pathlib import Path
 

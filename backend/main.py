@@ -642,34 +642,48 @@ async def preview_text_to_video_chunks(text: str = Form(...)) -> list[str]:
 class BumperStatus(BaseModel):
     has_intro: bool
     has_outro: bool
+    has_webcam: bool
+
+
+def _bumpers_status() -> BumperStatus:
+    return BumperStatus(
+        has_intro=get_bumper_path("intro") is not None,
+        has_outro=get_bumper_path("outro") is not None,
+        has_webcam=get_bumper_path("webcam") is not None,
+    )
 
 
 @app.get("/api/text-to-video/bumpers")
 async def get_bumpers_status() -> BumperStatus:
-    return BumperStatus(has_intro=get_bumper_path("intro") is not None, has_outro=get_bumper_path("outro") is not None)
+    return _bumpers_status()
 
 
 @app.post("/api/text-to-video/bumpers")
 async def upload_bumpers(
     intro_video: UploadFile | None = File(None),
     outro_video: UploadFile | None = File(None),
+    webcam_video: UploadFile | None = File(None),
 ) -> BumperStatus:
-    """Salva o vídeo de abertura/encerramento (ex: o usuário aparecendo)
-    de forma persistente — sobe uma vez, e ele entra automaticamente em
-    todo texto-para-vídeo gerado depois disso, sem precisar subir de novo."""
+    """Salva de forma persistente os vídeos próprios do texto-para-vídeo:
+    abertura/encerramento (ex: o usuário aparecendo em tela cheia) e/ou a
+    camada de webcam (ex: o usuário reagindo em silêncio, sobreposta num
+    canto durante o conteúdo narrado). Sobe uma vez, entra automaticamente
+    em toda geração depois disso, sem precisar subir de novo."""
     if intro_video and intro_video.filename:
         save_bumper("intro", intro_video.filename, intro_video.file)
     if outro_video and outro_video.filename:
         save_bumper("outro", outro_video.filename, outro_video.file)
-    return await get_bumpers_status()
+    if webcam_video and webcam_video.filename:
+        save_bumper("webcam", webcam_video.filename, webcam_video.file)
+    return _bumpers_status()
 
 
 @app.delete("/api/text-to-video/bumpers/{which}")
 async def delete_bumper(which: str) -> BumperStatus:
-    if which not in ("intro", "outro"):
-        raise HTTPException(status_code=400, detail="which deve ser 'intro' ou 'outro'")
+    if which not in ("intro", "outro", "webcam"):
+        raise HTTPException(status_code=400, detail="which deve ser 'intro', 'outro' ou 'webcam'")
     remove_bumper(which)
-    return await get_bumpers_status()
+    return _bumpers_status()
 
 
 def _run_text_to_video(
@@ -686,6 +700,8 @@ def _run_text_to_video(
     cover_image_path: Path | None,
     use_intro: bool,
     use_outro: bool,
+    use_webcam: bool,
+    webcam_position: str,
 ) -> None:
     job = TEXT_TO_VIDEO_JOBS[job_id]
     try:
@@ -704,6 +720,8 @@ def _run_text_to_video(
             orientation=orientation,
             intro_video_path=get_bumper_path("intro") if use_intro else None,
             outro_video_path=get_bumper_path("outro") if use_outro else None,
+            webcam_video_path=get_bumper_path("webcam") if use_webcam else None,
+            webcam_position=webcam_position,
         )
 
         thumbnail_path = None
@@ -738,6 +756,8 @@ async def create_text_to_video(
     cover_image: UploadFile | None = File(None),
     use_intro: bool = Form(True),
     use_outro: bool = Form(True),
+    use_webcam: bool = Form(True),
+    webcam_position: str = Form("bottom-right"),
 ) -> TextToVideoJob:
     """`chunk_assignments`: JSON com uma lista do mesmo tamanho dos trechos
     do texto, onde cada item é o índice (dentro de `manual_images`) da
@@ -784,7 +804,7 @@ async def create_text_to_video(
     background_tasks.add_task(
         _run_text_to_video, job_id, text, engine, voice_id.strip() or None, rate or None, manual_image_map,
         subtitles_enabled, subtitle_font_size or None, subtitle_position, orientation, cover_image_path,
-        use_intro, use_outro,
+        use_intro, use_outro, use_webcam, webcam_position,
     )
     return job
 
