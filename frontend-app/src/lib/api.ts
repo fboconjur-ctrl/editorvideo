@@ -7,6 +7,7 @@ import type {
   UploadInfo,
   EdlSegment,
   TextOverlay,
+  VoiceOption,
 } from "./types";
 
 // Em produção o app é servido pelo próprio FastAPI (mesma origem), então a
@@ -86,9 +87,10 @@ export function renderVideoUrl(jobId: string): string {
   return `${API_BASE}/api/render/${jobId}/video`;
 }
 
-export function createTranscription(file: File): Promise<TranscriptionJob> {
+export function createTranscription(file: File | null, youtubeUrl?: string): Promise<TranscriptionJob> {
   const formData = new FormData();
-  formData.append("file", file);
+  if (file) formData.append("file", file);
+  if (youtubeUrl) formData.append("youtube_url", youtubeUrl);
   return request<TranscriptionJob>("/api/transcriptions", { method: "POST", body: formData });
 }
 
@@ -104,11 +106,16 @@ export function transcriptionSrtUrl(jobId: string): string {
   return `${API_BASE}/api/transcriptions/${jobId}/srt`;
 }
 
-export function createTts(text: string, rate: number): Promise<TtsJob> {
+export function createTts(text: string, rate: number, voiceId?: string): Promise<TtsJob> {
   const formData = new FormData();
   formData.append("text", text);
   formData.append("rate", String(rate));
+  if (voiceId) formData.append("voice_id", voiceId);
   return request<TtsJob>("/api/tts", { method: "POST", body: formData });
+}
+
+export function getVoices(): Promise<VoiceOption[]> {
+  return request<VoiceOption[]>("/api/tts/voices");
 }
 
 export function getTts(jobId: string): Promise<TtsJob> {

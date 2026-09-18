@@ -67,7 +67,7 @@ export interface RenderJob {
   result_video: string | null;
 }
 
-export type TranscriptionStatus = "queued" | "transcribing" | "done" | "error";
+export type TranscriptionStatus = "queued" | "downloading" | "transcribing" | "done" | "error";
 
 export interface TranscriptionJob {
   id: string;
@@ -84,4 +84,10 @@ export interface TtsJob {
   status: TtsStatus;
   error: string | null;
   result_audio: string | null;
+}
+
+export interface VoiceOption {
+  id: string;
+  name: string;
+  languages: string[];
 }

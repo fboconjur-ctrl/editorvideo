@@ -1,9 +1,10 @@
-import { useState } from "react";
-import { Download, Mic, Volume2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Download, Mic, Volume2, Link as LinkIcon, Upload } from "lucide-react";
 import { Card, CardTitle, CardSubtitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Dropzone } from "../components/ui/Dropzone";
 import * as api from "../lib/api";
+import type { VoiceOption } from "../lib/types";
 
 export function ToolsPage() {
   return (
@@ -15,24 +16,33 @@ export function ToolsPage() {
 }
 
 function TranscriptionCard() {
+  const [source, setSource] = useState<"upload" | "youtube">("upload");
   const [file, setFile] = useState<File | null>(null);
+  const [youtubeUrl, setYoutubeUrl] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ jobId: string } | null>(null);
 
+  const canSubmit = source === "upload" ? !!file : youtubeUrl.trim().length > 0;
+
   async function handleTranscribe() {
-    if (!file) return;
+    if (!canSubmit) return;
     setBusy(true);
     setResult(null);
-    setStatus("Enviando arquivo...");
+    setStatus(source === "youtube" ? "Baixando áudio do YouTube..." : "Enviando arquivo...");
     try {
-      const job = await api.createTranscription(file);
+      const job = await api.createTranscription(source === "upload" ? file : null, source === "youtube" ? youtubeUrl.trim() : undefined);
       await poll(job.id);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err));
       setBusy(false);
     }
   }
+
+  const STATUS_LABELS: Record<string, string> = {
+    downloading: "Baixando áudio do YouTube...",
+    transcribing: "Transcrevendo áudio (pode demorar um pouco)...",
+  };
 
   async function poll(jobId: string) {
     // eslint-disable-next-line no-constant-condition
@@ -49,7 +59,7 @@ function TranscriptionCard() {
         setBusy(false);
         return;
       }
-      setStatus("Transcrevendo áudio (pode demorar um pouco)...");
+      setStatus(STATUS_LABELS[job.status] ?? job.status);
       await new Promise((r) => setTimeout(r, 2000));
     }
   }
@@ -60,13 +70,41 @@ function TranscriptionCard() {
         <Mic className="h-4 w-4 text-accent" />
         <CardTitle>Transcrever vídeo/áudio</CardTitle>
       </div>
-      <CardSubtitle>Sobe um arquivo e recebe de volta o texto e a legenda (.srt).</CardSubtitle>
+      <CardSubtitle>Sobe um arquivo ou cola um link do YouTube — recebe de volta o texto e a legenda (.srt).</CardSubtitle>
 
-      <div className="mt-4">
-        <Dropzone onFile={setFile} fileName={file?.name} />
+      <div className="mt-4 flex gap-1 rounded-lg border border-base-700 bg-base-900 p-1">
+        <button
+          onClick={() => setSource("upload")}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-medium ${
+            source === "upload" ? "bg-accent text-white" : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <Upload className="h-3.5 w-3.5" /> Arquivo
+        </button>
+        <button
+          onClick={() => setSource("youtube")}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-medium ${
+            source === "youtube" ? "bg-accent text-white" : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <LinkIcon className="h-3.5 w-3.5" /> Link do YouTube
+        </button>
       </div>
 
-      <Button className="mt-4" onClick={handleTranscribe} disabled={!file || busy}>
+      <div className="mt-4">
+        {source === "upload" ? (
+          <Dropzone onFile={setFile} fileName={file?.name} />
+        ) : (
+          <input
+            className="input-field"
+            placeholder="https://www.youtube.com/watch?v=..."
+            value={youtubeUrl}
+            onChange={(e) => setYoutubeUrl(e.target.value)}
+          />
+        )}
+      </div>
+
+      <Button className="mt-4" onClick={handleTranscribe} disabled={!canSubmit || busy}>
         {busy ? "Transcrevendo..." : "Transcrever"}
       </Button>
 
@@ -89,9 +127,18 @@ function TranscriptionCard() {
 function TtsCard() {
   const [text, setText] = useState("");
   const [rate, setRate] = useState("");
+  const [voices, setVoices] = useState<VoiceOption[]>([]);
+  const [voiceId, setVoiceId] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .getVoices()
+      .then(setVoices)
+      .catch(() => setVoices([]));
+  }, []);
 
   async function handleGenerate() {
     if (!text.trim()) return;
@@ -99,7 +146,7 @@ function TtsCard() {
     setAudioUrl(null);
     setStatus("Gerando áudio...");
     try {
-      const job = await api.createTts(text, Number(rate) || 0);
+      const job = await api.createTts(text, Number(rate) || 0, voiceId || undefined);
       await poll(job.id);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err));
@@ -141,14 +188,32 @@ function TtsCard() {
         onChange={(e) => setText(e.target.value)}
       />
 
-      <div className="mt-3">
-        <label className="text-xs text-slate-400">Velocidade da fala (deixe em branco para o padrão)</label>
-        <input
-          className="input-field mt-1"
-          placeholder="ex: 150 (palavras por minuto)"
-          value={rate}
-          onChange={(e) => setRate(e.target.value)}
-        />
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-400">Voz</label>
+          <select className="input-field mt-1" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
+            <option value="">Padrão do sistema</option>
+            {voices.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name} {v.languages.length ? `(${v.languages.join(", ")})` : ""}
+              </option>
+            ))}
+          </select>
+          {voices.length === 0 && (
+            <p className="mt-1 text-xs text-slate-500">
+              Nenhuma voz extra detectada. No Windows: Configurações → Hora e idioma → Fala → Adicionar vozes.
+            </p>
+          )}
+        </div>
+        <div>
+          <label className="text-xs text-slate-400">Velocidade (em branco = padrão)</label>
+          <input
+            className="input-field mt-1"
+            placeholder="ex: 150"
+            value={rate}
+            onChange={(e) => setRate(e.target.value)}
+          />
+        </div>
       </div>
 
       <Button className="mt-4" onClick={handleGenerate} disabled={!text.trim() || busy}>

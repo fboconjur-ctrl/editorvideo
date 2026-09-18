@@ -141,12 +141,18 @@ idealmente rodar em GPU.
 
 ## Ferramentas extras (aba "Ferramentas" do app)
 
-- **Transcrever vídeo/áudio**: sobe um arquivo e recebe de volta o texto
-  (`.txt`) e a legenda (`.srt`), sem mexer no vídeo. Útil pra tirar uma
-  transcrição rápida de uma entrevista/reunião/podcast.
+- **Transcrever vídeo/áudio**: sobe um arquivo **ou cola um link do
+  YouTube** (usa `yt-dlp` para baixar só o áudio, sem baixar o vídeo
+  inteiro) e recebe de volta o texto (`.txt`) e a legenda (`.srt`), sem
+  mexer no vídeo. Útil pra tirar uma transcrição rápida de uma
+  entrevista/reunião/podcast/vídeo do YouTube.
 - **Texto para voz**: gera um áudio narrado a partir de texto digitado,
   usando `pyttsx3` — no Windows usa as vozes SAPI5 já instaladas no
-  sistema (Narrador), sem precisar de internet nem baixar modelo.
+  sistema, sem precisar de internet nem baixar modelo. Dá pra escolher
+  entre as vozes disponíveis no seletor da interface; se só aparecer uma
+  opção, é porque o Windows só tem uma voz instalada — mais vozes (outros
+  idiomas/sotaques) podem ser adicionadas em Configurações → Hora e
+  idioma → Fala → Adicionar vozes.
 
 ## Roadmap
 

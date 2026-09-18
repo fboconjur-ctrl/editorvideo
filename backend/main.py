@@ -22,8 +22,9 @@ from pipeline.stabilize import stabilize
 from pipeline.subtitles import burn_subtitles, write_srt
 from pipeline.timeline_render import render_edl
 from pipeline.transcribe import transcribe
-from pipeline.tts import synthesize_speech
+from pipeline.tts import list_voices, synthesize_speech
 from pipeline.upscale import upscale
+from pipeline.youtube import download_audio
 
 BASE_DIR = Path(__file__).parent
 UPLOADS_DIR = BASE_DIR / "uploads"
@@ -375,7 +376,7 @@ async def download_render(job_id: str) -> FileResponse:
 # Sobe um vídeo/áudio e recebe de volta um .txt e um .srt, sem rodar
 # nenhuma outra etapa do pipeline.
 
-TranscriptionStatus = Literal["queued", "transcribing", "done", "error"]
+TranscriptionStatus = Literal["queued", "downloading", "transcribing", "done", "error"]
 
 
 class TranscriptionJob(BaseModel):
@@ -412,19 +413,43 @@ def _run_transcription(job_id: str, input_path: Path) -> None:
         job.error = str(exc)
 
 
+def _run_youtube_transcription(job_id: str, input_path: Path, url: str) -> None:
+    job = TRANSCRIPTION_JOBS[job_id]
+    try:
+        job.status = "downloading"
+        download_audio(url, input_path)
+    except Exception as exc:  # noqa: BLE001
+        job.status = "error"
+        job.error = f"Falha ao baixar áudio do YouTube: {exc}"
+        return
+    _run_transcription(job_id, input_path)
+
+
 @app.post("/api/transcriptions")
-async def create_transcription(background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> TranscriptionJob:
+async def create_transcription(
+    background_tasks: BackgroundTasks,
+    file: UploadFile | None = File(None),
+    youtube_url: str = Form(""),
+) -> TranscriptionJob:
+    youtube_url = youtube_url.strip()
+    if not file and not youtube_url:
+        raise HTTPException(status_code=400, detail="Envie um arquivo ou um link do YouTube.")
+
     job_id = str(uuid.uuid4())
     upload_dir = UPLOADS_DIR / job_id
     upload_dir.mkdir(parents=True)
-
     input_path = upload_dir / "input.mp4"
-    with input_path.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
 
     job = TranscriptionJob(id=job_id)
     TRANSCRIPTION_JOBS[job_id] = job
-    background_tasks.add_task(_run_transcription, job_id, input_path)
+
+    if youtube_url:
+        background_tasks.add_task(_run_youtube_transcription, job_id, input_path, youtube_url)
+    else:
+        with input_path.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+        background_tasks.add_task(_run_transcription, job_id, input_path)
+
     return job
 
 
@@ -460,7 +485,7 @@ class TtsJob(BaseModel):
 TTS_JOBS: dict[str, TtsJob] = {}
 
 
-def _run_tts(job_id: str, text: str, rate: int | None) -> None:
+def _run_tts(job_id: str, text: str, rate: int | None, voice_id: str | None) -> None:
     job = TTS_JOBS[job_id]
     try:
         job.status = "generating"
@@ -468,7 +493,7 @@ def _run_tts(job_id: str, text: str, rate: int | None) -> None:
         job_dir.mkdir(exist_ok=True)
         output_path = job_dir / "voz.wav"
 
-        synthesize_speech(text, output_path, rate=rate)
+        synthesize_speech(text, output_path, rate=rate, voice_id=voice_id)
 
         job.result_audio = str(output_path)
         job.status = "done"
@@ -477,12 +502,28 @@ def _run_tts(job_id: str, text: str, rate: int | None) -> None:
         job.error = str(exc)
 
 
+class VoiceOption(BaseModel):
+    id: str
+    name: str
+    languages: list[str]
+
+
+@app.get("/api/tts/voices")
+async def get_voices() -> list[VoiceOption]:
+    return [VoiceOption(id=v.id, name=v.name, languages=v.languages) for v in list_voices()]
+
+
 @app.post("/api/tts")
-async def create_tts(background_tasks: BackgroundTasks, text: str = Form(...), rate: int = Form(0)) -> TtsJob:
+async def create_tts(
+    background_tasks: BackgroundTasks,
+    text: str = Form(...),
+    rate: int = Form(0),
+    voice_id: str = Form(""),
+) -> TtsJob:
     job_id = str(uuid.uuid4())
     job = TtsJob(id=job_id)
     TTS_JOBS[job_id] = job
-    background_tasks.add_task(_run_tts, job_id, text, rate or None)
+    background_tasks.add_task(_run_tts, job_id, text, rate or None, voice_id.strip() or None)
     return job
 
 
