@@ -4,6 +4,7 @@ própria máquina."""
 import json
 import shutil
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Literal
 
@@ -642,7 +643,7 @@ TEXT_TO_VIDEO_JOBS: dict[str, TextToVideoJob] = {}
 
 
 @app.post("/api/text-to-video/chunks")
-async def preview_text_to_video_chunks(text: str = Form(...)) -> list[str]:
+def preview_text_to_video_chunks(text: str = Form(...)) -> list[str]:
     """Devolve como o texto vai ser dividido em trechos, sem gerar nada —
     usado pela interface pra deixar o usuário escolher manualmente qual
     imagem vai em qual trecho, em vez de adivinhar uma ordem/ciclo."""
@@ -666,7 +667,7 @@ class ChunkMediaPreview(BaseModel):
 
 
 @app.post("/api/text-to-video/chunk-media-options")
-async def preview_chunk_media_options(
+def preview_chunk_media_options(
     text: str = Form(...),
     orientation: str = Form("horizontal"),
     prefer_photos: bool = Form(True),
@@ -678,7 +679,16 @@ async def preview_chunk_media_options(
     baixadas ficam salvas temporariamente (pasta própria por geração de
     preview) só pra servir essas miniaturas; não entram no vídeo até o
     usuário escolher uma (via o mesmo mecanismo de mídia manual/
-    chunk_assignments já existente)."""
+    chunk_assignments já existente).
+
+    IMPORTANTE: essa rota é `def` (não `async def`) de propósito — ela
+    faz várias buscas de rede bloqueantes (Wikipedia/Pexels por trecho).
+    O FastAPI roda rotas `def` normais numa thread separada
+    automaticamente; se fosse `async def` sem usar `await` de verdade,
+    esse trabalho pesado travaria a ÚNICA thread do event loop e o site
+    inteiro pararia de responder (inclusive pra carregar a página
+    inicial) até essa busca terminar — foi exatamente esse bug que
+    deixou o `localhost:8000` "sem abrir" numa geração anterior."""
     chunks = split_into_chunks(text)
     context = build_article_context(text)
     cache: dict[str, bytes | None] = {}
@@ -690,8 +700,8 @@ async def preview_chunk_media_options(
     preview_dir = UPLOADS_DIR / "previews" / preview_id
     preview_dir.mkdir(parents=True, exist_ok=True)
 
-    result_chunks: list[ChunkMediaOptions] = []
-    for i, chunk in enumerate(chunks):
+    def _gather(args: tuple[int, str]) -> ChunkMediaOptions:
+        i, chunk = args
         candidates = list_media_candidates_for_chunk(
             chunk, api_key, used_ids, i, resolution, context, cache, prefer_photos, count=3
         )
@@ -704,13 +714,19 @@ async def preview_chunk_media_options(
                 index=j, type=media_type, source=source_desc,
                 url=f"/api/text-to-video/preview-media/{preview_id}/{filename}",
             ))
-        result_chunks.append(ChunkMediaOptions(text=chunk, options=options))
+        return ChunkMediaOptions(text=chunk, options=options)
+
+    # Busca os trechos em paralelo (cada um já é bem lento sozinho, e são
+    # independentes entre si) — sem isso, um texto com 10+ trechos podia
+    # levar minutos só nessa etapa de preview.
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        result_chunks = list(executor.map(_gather, enumerate(chunks)))
 
     return ChunkMediaPreview(chunks=result_chunks)
 
 
 @app.get("/api/text-to-video/preview-media/{preview_id}/{filename}")
-async def get_preview_media(preview_id: str, filename: str) -> FileResponse:
+def get_preview_media(preview_id: str, filename: str) -> FileResponse:
     previews_root = (UPLOADS_DIR / "previews").resolve()
     path = (previews_root / preview_id / filename).resolve()
     if not path.is_relative_to(previews_root) or not path.exists():
