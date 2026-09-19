@@ -33,8 +33,10 @@ from pipeline.settings_store import (
 from pipeline.text_to_video import (
     HORIZONTAL_RESOLUTION,
     VERTICAL_RESOLUTION,
+    build_article_context,
     build_cover_thumbnail,
     generate_video_from_text,
+    list_media_candidates_for_chunk,
     split_into_chunks,
 )
 from pipeline.bumpers import (
@@ -645,6 +647,75 @@ async def preview_text_to_video_chunks(text: str = Form(...)) -> list[str]:
     usado pela interface pra deixar o usuário escolher manualmente qual
     imagem vai em qual trecho, em vez de adivinhar uma ordem/ciclo."""
     return split_into_chunks(text)
+
+
+class ChunkMediaOption(BaseModel):
+    index: int
+    type: str
+    source: str
+    url: str
+
+
+class ChunkMediaOptions(BaseModel):
+    text: str
+    options: list[ChunkMediaOption]
+
+
+class ChunkMediaPreview(BaseModel):
+    chunks: list[ChunkMediaOptions]
+
+
+@app.post("/api/text-to-video/chunk-media-options")
+async def preview_chunk_media_options(
+    text: str = Form(...),
+    orientation: str = Form("horizontal"),
+    prefer_photos: bool = Form(True),
+) -> ChunkMediaPreview:
+    """Busca até 3 mídias candidatas (foto/vídeo) por trecho e devolve
+    pra interface mostrar como opções — em vez de confiar cegamente na
+    primeira mídia que a busca automática encontrar, o usuário pode ver
+    2-3 alternativas e trocar rapidamente a que ficou ruim. As mídias
+    baixadas ficam salvas temporariamente (pasta própria por geração de
+    preview) só pra servir essas miniaturas; não entram no vídeo até o
+    usuário escolher uma (via o mesmo mecanismo de mídia manual/
+    chunk_assignments já existente)."""
+    chunks = split_into_chunks(text)
+    context = build_article_context(text)
+    cache: dict[str, bytes | None] = {}
+    used_ids: set[str] = set()
+    resolution = VERTICAL_RESOLUTION if orientation == "vertical" else HORIZONTAL_RESOLUTION
+    api_key = get_pexels_api_key() or ""
+
+    preview_id = str(uuid.uuid4())
+    preview_dir = UPLOADS_DIR / "previews" / preview_id
+    preview_dir.mkdir(parents=True, exist_ok=True)
+
+    result_chunks: list[ChunkMediaOptions] = []
+    for i, chunk in enumerate(chunks):
+        candidates = list_media_candidates_for_chunk(
+            chunk, api_key, used_ids, i, resolution, context, cache, prefer_photos, count=3
+        )
+        options: list[ChunkMediaOption] = []
+        for j, (media_type, media_bytes, source_desc) in enumerate(candidates):
+            ext = "mp4" if media_type == "video" else "jpg"
+            filename = f"chunk_{i}_opt_{j}.{ext}"
+            (preview_dir / filename).write_bytes(media_bytes)
+            options.append(ChunkMediaOption(
+                index=j, type=media_type, source=source_desc,
+                url=f"/api/text-to-video/preview-media/{preview_id}/{filename}",
+            ))
+        result_chunks.append(ChunkMediaOptions(text=chunk, options=options))
+
+    return ChunkMediaPreview(chunks=result_chunks)
+
+
+@app.get("/api/text-to-video/preview-media/{preview_id}/{filename}")
+async def get_preview_media(preview_id: str, filename: str) -> FileResponse:
+    previews_root = (UPLOADS_DIR / "previews").resolve()
+    path = (previews_root / preview_id / filename).resolve()
+    if not path.is_relative_to(previews_root) or not path.exists():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+    return FileResponse(path)
 
 
 class BumperStatus(BaseModel):

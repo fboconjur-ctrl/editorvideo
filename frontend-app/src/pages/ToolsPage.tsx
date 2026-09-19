@@ -369,6 +369,8 @@ function TextToVideoCard() {
   const [chunks, setChunks] = useState<string[] | null>(null);
   const [assignments, setAssignments] = useState<(number | null)[]>([]);
   const [loadingChunks, setLoadingChunks] = useState(false);
+  const [mediaOptions, setMediaOptions] = useState<api.ChunkMediaOptions[] | null>(null);
+  const [loadingMediaOptions, setLoadingMediaOptions] = useState(false);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
   const [subtitleStyle, setSubtitleStyle] = useState<"static" | "karaoke">("karaoke");
   const [orientation, setOrientation] = useState<"horizontal" | "vertical">("horizontal");
@@ -461,6 +463,7 @@ function TextToVideoCard() {
     // podem não bater mais com as frases certas).
     setChunks(null);
     setAssignments([]);
+    setMediaOptions(null);
   }
 
   async function handleSplitChunks() {
@@ -483,6 +486,41 @@ function TextToVideoCard() {
       next[chunkIndex] = imageIndex;
       return next;
     });
+  }
+
+  async function handleFindMediaOptions() {
+    if (!text.trim()) return;
+    setLoadingMediaOptions(true);
+    try {
+      const result = await api.previewChunkMediaOptions(text, orientation, preferPhotos);
+      setChunks(result.chunks.map((c) => c.text));
+      setAssignments(result.chunks.map(() => null));
+      setMediaOptions(result.chunks);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingMediaOptions(false);
+    }
+  }
+
+  // Escolher uma opção sugerida reaproveita o MESMO mecanismo de mídia
+  // manual/chunk_assignments já existente: baixa o arquivo (já teve seu
+  // conteúdo buscado no preview) como um File e trata como se o usuário
+  // tivesse subido essa imagem/vídeo manualmente pra esse trecho.
+  async function handlePickMediaOption(chunkIndex: number, option: api.ChunkMediaOption) {
+    try {
+      const res = await fetch(option.url);
+      const blob = await res.blob();
+      const ext = option.type === "video" ? "mp4" : "jpg";
+      const file = new File([blob], `sugestao_trecho${chunkIndex}_opt${option.index}.${ext}`, { type: blob.type });
+      setManualImages((prev) => {
+        const nextImages = [...prev, file];
+        setAssignment(chunkIndex, nextImages.length - 1);
+        return nextImages;
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function handleSaveKey() {
@@ -813,9 +851,12 @@ function TextToVideoCard() {
           </div>
         )}
 
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button variant="secondary" onClick={handleSplitChunks} disabled={!text.trim() || loadingChunks}>
             {loadingChunks ? "Dividindo..." : "Dividir texto em trechos"}
+          </Button>
+          <Button variant="secondary" onClick={handleFindMediaOptions} disabled={!text.trim() || loadingMediaOptions}>
+            {loadingMediaOptions ? "Buscando opções..." : "Buscar opções de imagem por trecho"}
           </Button>
           {chunks && (
             <span className="text-xs text-slate-500">{chunks.length} trecho(s) — escolha a imagem de cada um abaixo</span>
@@ -823,25 +864,54 @@ function TextToVideoCard() {
         </div>
 
         {chunks && chunks.length > 0 && (
-          <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+          <div className="mt-3 max-h-96 space-y-2 overflow-y-auto pr-1">
             {chunks.map((chunk, i) => (
-              <div key={i} className="flex items-center gap-2 rounded-lg border border-base-800 bg-base-950 p-2">
-                <span className="flex-1 truncate text-xs text-slate-300" title={chunk}>
-                  {i + 1}. {chunk}
-                </span>
-                <select
-                  className="input-field !mt-0 w-40 shrink-0 text-xs"
-                  value={assignments[i] ?? ""}
-                  onChange={(e) => setAssignment(i, e.target.value === "" ? null : Number(e.target.value))}
-                  disabled={manualImages.length === 0}
-                >
-                  <option value="">Automático</option>
-                  {manualImages.map((f, imgIdx) => (
-                    <option key={imgIdx} value={imgIdx}>
-                      {f.name}
-                    </option>
-                  ))}
-                </select>
+              <div key={i} className="rounded-lg border border-base-800 bg-base-950 p-2">
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 truncate text-xs text-slate-300" title={chunk}>
+                    {i + 1}. {chunk}
+                  </span>
+                  <select
+                    className="input-field !mt-0 w-40 shrink-0 text-xs"
+                    value={assignments[i] ?? ""}
+                    onChange={(e) => setAssignment(i, e.target.value === "" ? null : Number(e.target.value))}
+                    disabled={manualImages.length === 0}
+                  >
+                    <option value="">Automático</option>
+                    {manualImages.map((f, imgIdx) => (
+                      <option key={imgIdx} value={imgIdx}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {mediaOptions?.[i]?.options && mediaOptions[i].options.length > 0 && (
+                  <div className="mt-2 flex gap-2">
+                    {mediaOptions[i].options.map((option) => {
+                      const isSelected =
+                        assignments[i] !== null &&
+                        manualImages[assignments[i] as number]?.name ===
+                          `sugestao_trecho${i}_opt${option.index}.${option.type === "video" ? "mp4" : "jpg"}`;
+                      return (
+                        <button
+                          key={option.index}
+                          type="button"
+                          className={`overflow-hidden rounded border-2 ${
+                            isSelected ? "border-accent" : "border-transparent hover:border-base-600"
+                          }`}
+                          title={option.source}
+                          onClick={() => handlePickMediaOption(i, option)}
+                        >
+                          {option.type === "video" ? (
+                            <video src={option.url} muted className="h-14 w-14 object-cover" />
+                          ) : (
+                            <img src={option.url} alt={option.source} className="h-14 w-14 object-cover" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             ))}
           </div>

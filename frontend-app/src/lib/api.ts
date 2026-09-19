@@ -156,6 +156,34 @@ export function previewTextToVideoChunks(text: string): Promise<string[]> {
   return request<string[]>("/api/text-to-video/chunks", { method: "POST", body: formData });
 }
 
+export interface ChunkMediaOption {
+  index: number;
+  type: "photo" | "video" | string;
+  source: string;
+  url: string;
+}
+
+export interface ChunkMediaOptions {
+  text: string;
+  options: ChunkMediaOption[];
+}
+
+export interface ChunkMediaPreview {
+  chunks: ChunkMediaOptions[];
+}
+
+export function previewChunkMediaOptions(
+  text: string,
+  orientation: "horizontal" | "vertical",
+  preferPhotos: boolean
+): Promise<ChunkMediaPreview> {
+  const formData = new FormData();
+  formData.append("text", text);
+  formData.append("orientation", orientation);
+  formData.append("prefer_photos", String(preferPhotos));
+  return request<ChunkMediaPreview>("/api/text-to-video/chunk-media-options", { method: "POST", body: formData });
+}
+
 export function createTextToVideo(
   text: string,
   engine: TtsEngine,

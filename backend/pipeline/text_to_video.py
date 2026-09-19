@@ -493,6 +493,68 @@ def resolve_media_for_chunk(
     return "color", None, candidate_queries[0] if candidate_queries else keyphrase_pt
 
 
+def list_media_candidates_for_chunk(
+    chunk_text: str,
+    api_key: str,
+    used_ids: set[str],
+    chunk_index: int,
+    resolution: tuple[int, int],
+    context: ArticleContext | None,
+    cache: dict[str, bytes | None],
+    prefer_photos: bool = True,
+    count: int = 3,
+) -> list[tuple[str, bytes, str]]:
+    """Como `resolve_media_for_chunk`, mas devolve até `count` candidatos
+    distintos em vez de parar no primeiro que encontrar — usado pelo
+    seletor visual de opções por trecho na interface, pra o usuário poder
+    trocar rapidamente a mídia escolhida automaticamente em vez de
+    confiar cegamente nela. Usa a mesma lógica de prioridade (nome
+    próprio > tema do dicionário editorial > contexto da matéria >
+    tradução genérica) só que sem parar cedo."""
+    results: list[tuple[str, bytes, str]] = []
+
+    keyphrases_pt = extract_keyphrases(chunk_text)
+    keyphrase_pt = keyphrases_pt[0] if keyphrases_pt else chunk_text
+
+    if looks_like_proper_name(keyphrase_pt):
+        image = search_wikipedia_image_cached(keyphrase_pt, cache)
+        if image:
+            results.append(("photo", image, f"wikipedia:{keyphrase_pt}"))
+
+    match = concept_match(chunk_text)
+    if match:
+        if match.wiki_title:
+            image = search_wikipedia_image_cached(match.wiki_title, cache)
+            if image:
+                results.append(("photo", image, f"wikipedia:{match.wiki_title}"))
+        candidate_queries = [*match.queries_pt, *match.queries_en]
+    elif looks_like_proper_name(keyphrase_pt):
+        candidate_queries = ["press conference news"]
+    elif context and context.primary_concept and _has_ambiguous_generic_word(chunk_text):
+        candidate_queries = [*context.primary_concept.queries_pt, *context.primary_concept.queries_en]
+    else:
+        candidate_queries = [translate_to_english(keyphrase_pt)]
+
+    already = {q.strip().lower() for q in candidate_queries}
+    for phrase in keyphrases_pt[1:3]:
+        alt_query = translate_to_english(phrase)
+        if alt_query.strip().lower() not in already:
+            candidate_queries.append(alt_query)
+            already.add(alt_query.strip().lower())
+
+    if api_key:
+        width, height = resolution
+        orientation = "portrait" if height > width else "landscape"
+        for query in candidate_queries:
+            if len(results) >= count:
+                break
+            found = _try_pexels(query, api_key, used_ids, orientation, width, prefer_photos)
+            if found:
+                results.append(found)
+
+    return results[:count]
+
+
 def _fade_filter(duration: float) -> str:
     fade = min(FADE_SECONDS, duration / 2)
     fade_out_start = max(0.0, duration - fade)
