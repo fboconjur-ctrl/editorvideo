@@ -717,9 +717,11 @@ def preview_chunk_media_options(
         return ChunkMediaOptions(text=chunk, options=options)
 
     # Busca os trechos em paralelo (cada um já é bem lento sozinho, e são
-    # independentes entre si) — sem isso, um texto com 10+ trechos podia
-    # levar minutos só nessa etapa de preview.
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    # independentes entre si) — sem isso, um texto com muitos trechos
+    # (matérias longas podem passar de 40) podia levar minutos só nessa
+    # etapa de preview. As threads aqui só esperam rede (I/O), não usam
+    # CPU de verdade, então um número maior é seguro.
+    with ThreadPoolExecutor(max_workers=8) as executor:
         result_chunks = list(executor.map(_gather, enumerate(chunks)))
 
     return ChunkMediaPreview(chunks=result_chunks)

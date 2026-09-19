@@ -542,15 +542,28 @@ def list_media_candidates_for_chunk(
             candidate_queries.append(alt_query)
             already.add(alt_query.strip().lower())
 
-    if api_key:
+    if api_key and candidate_queries:
         width, height = resolution
         orientation = "portrait" if height > width else "landscape"
-        for query in candidate_queries:
-            if len(results) >= count:
-                break
-            found = _try_pexels(query, api_key, used_ids, orientation, width, prefer_photos)
-            if found:
-                results.append(found)
+        # Dispara todas as queries candidatas EM PARALELO em vez de uma
+        # de cada vez — com textos longos (dezenas de trechos), buscar
+        # sequencialmente aqui era o gargalo real: cada trecho podia
+        # levar vários segundos sozinho mesmo já rodando trechos
+        # diferentes em paralelo lá fora (em preview_chunk_media_options).
+        with ThreadPoolExecutor(max_workers=min(6, len(candidate_queries))) as executor:
+            futures = [
+                executor.submit(_try_pexels, q, api_key, used_ids, orientation, width, prefer_photos)
+                for q in candidate_queries
+            ]
+            try:
+                for future in as_completed(futures, timeout=25):
+                    found = future.result()
+                    if found:
+                        results.append(found)
+                    if len(results) >= count:
+                        break
+            except FuturesTimeoutError:
+                pass
 
     return results[:count]
 
