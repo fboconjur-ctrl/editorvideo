@@ -509,10 +509,19 @@ function TextToVideoCard() {
   // tivesse subido essa imagem/vídeo manualmente pra esse trecho.
   async function handlePickMediaOption(chunkIndex: number, option: api.ChunkMediaOption) {
     try {
+      const ext = option.type === "video" ? "mp4" : "jpg";
+      const filename = `sugestao_trecho${chunkIndex}_opt${option.index}.${ext}`;
+      // Clicar de novo na mesma sugestão não deve duplicar o arquivo na
+      // lista — só aponta o trecho pra ela de novo (reaproveita a mesma
+      // entrada em vez de baixar e adicionar tudo de novo).
+      const existingIndex = manualImages.findIndex((f) => f.name === filename);
+      if (existingIndex !== -1) {
+        setAssignment(chunkIndex, existingIndex);
+        return;
+      }
       const res = await fetch(option.url);
       const blob = await res.blob();
-      const ext = option.type === "video" ? "mp4" : "jpg";
-      const file = new File([blob], `sugestao_trecho${chunkIndex}_opt${option.index}.${ext}`, { type: blob.type });
+      const file = new File([blob], filename, { type: blob.type });
       setManualImages((prev) => {
         const nextImages = [...prev, file];
         setAssignment(chunkIndex, nextImages.length - 1);
@@ -521,6 +530,21 @@ function TextToVideoCard() {
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  // Remove uma mídia manual da lista — os trechos que apontavam pra ela
+  // voltam pro automático, e os índices dos trechos que apontavam pras
+  // mídias DEPOIS dela na lista são ajustados (senão passariam a apontar
+  // pra mídia errada depois da remoção).
+  function handleRemoveManualImage(indexToRemove: number) {
+    setManualImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+    setAssignments((prev) =>
+      prev.map((assigned) => {
+        if (assigned === null) return null;
+        if (assigned === indexToRemove) return null;
+        return assigned > indexToRemove ? assigned - 1 : assigned;
+      })
+    );
   }
 
   async function handleSaveKey() {
@@ -833,13 +857,25 @@ function TextToVideoCard() {
           accept="image/*,video/*"
           multiple
           className="input-field mt-2"
-          onChange={(e) => setManualImages(Array.from(e.target.files ?? []))}
+          onChange={(e) => {
+            const newFiles = Array.from(e.target.files ?? []);
+            if (newFiles.length > 0) setManualImages((prev) => [...prev, ...newFiles]);
+            e.target.value = "";
+          }}
         />
 
         {manualImages.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-2">
             {imagePreviews.map((url, i) => (
-              <div key={i} className="flex flex-col items-center gap-1">
+              <div key={i} className="relative flex flex-col items-center gap-1">
+                <button
+                  type="button"
+                  className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] leading-none text-white hover:bg-red-400"
+                  title="Remover"
+                  onClick={() => handleRemoveManualImage(i)}
+                >
+                  ×
+                </button>
                 {manualImages[i]?.type.startsWith("video/") ? (
                   <video src={url} muted className="h-14 w-14 rounded object-cover" />
                 ) : (
