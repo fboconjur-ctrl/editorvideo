@@ -31,7 +31,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   if (!res.ok) {
-    throw new ApiError(`Falha na requisição (HTTP ${res.status}).`);
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = body?.detail ? ` ${body.detail}` : "";
+    } catch {
+      // corpo não é JSON (ou está vazio) — segue só com o código HTTP
+    }
+    throw new ApiError(`Falha na requisição (HTTP ${res.status}).${detail}`);
   }
   return res.json();
 }
