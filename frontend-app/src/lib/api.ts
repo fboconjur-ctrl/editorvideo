@@ -11,6 +11,7 @@ import type {
   TtsEngine,
   TextToVideoJob,
   SettingsInfo,
+  SlidesToVideoJob,
 } from "./types";
 
 // Em produção o app é servido pelo próprio FastAPI (mesma origem), então a
@@ -279,4 +280,53 @@ export function textToVideoUrl(jobId: string): string {
 
 export function textToVideoLogUrl(jobId: string): string {
   return `${API_BASE}/api/text-to-video/${jobId}/log`;
+}
+
+export interface SlidesUploadInfo {
+  upload_id: string;
+  slide_urls: string[];
+}
+
+export function uploadSlides(file: File): Promise<SlidesUploadInfo> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return request<SlidesUploadInfo>("/api/slides-to-video/upload", { method: "POST", body: formData });
+}
+
+export function createSlidesToVideo(
+  uploadId: string,
+  narrations: string[],
+  engine: TtsEngine,
+  rate: number,
+  voiceId?: string,
+  subtitlesEnabled?: boolean,
+  subtitleStyle?: "static" | "karaoke",
+  orientation?: "horizontal" | "vertical",
+  useIntro?: boolean,
+  useOutro?: boolean,
+  useWebcam?: boolean,
+  webcamPosition?: WebcamPosition
+): Promise<SlidesToVideoJob> {
+  const formData = new FormData();
+  formData.append("upload_id", uploadId);
+  formData.append("narrations", JSON.stringify(narrations));
+  formData.append("engine", engine);
+  formData.append("rate", String(rate));
+  if (voiceId) formData.append("voice_id", voiceId);
+  if (subtitlesEnabled) formData.append("subtitles_enabled", "true");
+  formData.append("subtitle_style", subtitleStyle ?? "static");
+  formData.append("orientation", orientation ?? "horizontal");
+  formData.append("use_intro", String(useIntro ?? true));
+  formData.append("use_outro", String(useOutro ?? true));
+  formData.append("use_webcam", String(useWebcam ?? true));
+  formData.append("webcam_position", webcamPosition ?? "bottom-right");
+  return request<SlidesToVideoJob>("/api/slides-to-video", { method: "POST", body: formData });
+}
+
+export function getSlidesToVideo(jobId: string): Promise<SlidesToVideoJob> {
+  return request<SlidesToVideoJob>(`/api/slides-to-video/${jobId}`);
+}
+
+export function slidesToVideoUrl(jobId: string): string {
+  return `${API_BASE}/api/slides-to-video/${jobId}/video`;
 }

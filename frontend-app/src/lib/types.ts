@@ -115,3 +115,12 @@ export interface SettingsInfo {
   has_pexels_key: boolean;
   has_huggingface_token: boolean;
 }
+
+export type SlidesToVideoStatus = "queued" | "generating" | "done" | "error";
+
+export interface SlidesToVideoJob {
+  id: string;
+  status: SlidesToVideoStatus;
+  error: string | null;
+  result_video: string | null;
+}

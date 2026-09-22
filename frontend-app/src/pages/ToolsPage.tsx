@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Download, Mic, Volume2, Link as LinkIcon, Upload, Clapperboard, KeyRound } from "lucide-react";
+import { Download, Mic, Volume2, Link as LinkIcon, Upload, Clapperboard, KeyRound, Presentation } from "lucide-react";
 import { Card, CardTitle, CardSubtitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Toggle } from "../components/ui/Toggle";
@@ -13,6 +13,7 @@ export function ToolsPage() {
       <TranscriptionCard />
       <TtsCard />
       <TextToVideoCard />
+      <PresentationToVideoCard />
     </div>
   );
 }
@@ -1025,6 +1026,288 @@ function TextToVideoCard() {
               </Button>
             )}
           </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function PresentationToVideoCard() {
+  const [pptxFile, setPptxFile] = useState<File | null>(null);
+  const [uploadId, setUploadId] = useState<string | null>(null);
+  const [slideUrls, setSlideUrls] = useState<string[]>([]);
+  const [narrations, setNarrations] = useState<string[]>([]);
+  const [uploadingPptx, setUploadingPptx] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const [rate, setRate] = useState("");
+  const selection = useTtsSelection();
+  const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
+  const [subtitleStyle, setSubtitleStyle] = useState<"static" | "karaoke">("karaoke");
+  const [orientation, setOrientation] = useState<"horizontal" | "vertical">("horizontal");
+
+  const [bumperStatus, setBumperStatus] = useState<api.BumperStatus | null>(null);
+  const [useIntro, setUseIntro] = useState(true);
+  const [useOutro, setUseOutro] = useState(true);
+  const [useWebcam, setUseWebcam] = useState(true);
+  const [webcamPosition, setWebcamPosition] = useState<api.WebcamPosition>("bottom-right");
+
+  const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getBumpersStatus().then(setBumperStatus).catch(() => setBumperStatus(null));
+  }, []);
+
+  async function handleUploadPptx(file: File) {
+    setPptxFile(file);
+    setUploadError(null);
+    setUploadingPptx(true);
+    setUploadId(null);
+    setSlideUrls([]);
+    setNarrations([]);
+    setVideoUrl(null);
+    try {
+      const info = await api.uploadSlides(file);
+      setUploadId(info.upload_id);
+      setSlideUrls(info.slide_urls);
+      setNarrations(info.slide_urls.map(() => ""));
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadingPptx(false);
+    }
+  }
+
+  function updateNarration(index: number, value: string) {
+    setNarrations((prev) => prev.map((n, i) => (i === index ? value : n)));
+  }
+
+  const canSubmit = !!uploadId && narrations.some((n) => n.trim().length > 0);
+
+  async function handleGenerate() {
+    if (!uploadId || !canSubmit) return;
+    setBusy(true);
+    setVideoUrl(null);
+    setStatus("Gerando narração e montando o vídeo...");
+    try {
+      const job = await api.createSlidesToVideo(
+        uploadId,
+        narrations,
+        selection.engine,
+        Number(rate) || 0,
+        selection.voiceId || undefined,
+        subtitlesEnabled,
+        subtitleStyle,
+        orientation,
+        bumperStatus?.has_intro ? useIntro : false,
+        bumperStatus?.has_outro ? useOutro : false,
+        (bumperStatus?.webcam_clips.length ?? 0) > 0 ? useWebcam : false,
+        webcamPosition
+      );
+      await poll(job.id);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+      setBusy(false);
+    }
+  }
+
+  async function poll(jobId: string) {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const job = await api.getSlidesToVideo(jobId);
+      if (job.status === "done") {
+        setStatus("Vídeo gerado!");
+        setVideoUrl(api.slidesToVideoUrl(jobId));
+        setBusy(false);
+        return;
+      }
+      if (job.status === "error") {
+        setStatus(`Erro: ${job.error}`);
+        setBusy(false);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2">
+        <Presentation className="h-4 w-4 text-accent" />
+        <CardTitle>Apresentação (PPTX) para vídeo</CardTitle>
+      </div>
+      <CardSubtitle>
+        Envie um PowerPoint e escreva o texto que vai ser narrado em cada slide — cada slide vira um
+        trecho do vídeo, com a imagem exata do próprio slide (sem busca automática de imagem).
+      </CardSubtitle>
+
+      <label
+        className="mt-4 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-base-600 px-6 py-8 text-center transition-colors hover:border-base-500"
+      >
+        <Upload className="h-6 w-6 text-slate-500" />
+        {pptxFile ? (
+          <div className="text-sm text-slate-200">{pptxFile.name}</div>
+        ) : (
+          <div className="text-sm text-slate-300">Clique para escolher um arquivo .pptx</div>
+        )}
+        <input
+          type="file"
+          accept=".pptx"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleUploadPptx(file);
+          }}
+        />
+      </label>
+      {uploadingPptx && <p className="mt-2 text-xs text-slate-500">Convertendo slides...</p>}
+      {uploadError && <p className="mt-2 text-xs text-red-400">{uploadError}</p>}
+
+      {slideUrls.length > 0 && (
+        <div className="mt-4 space-y-4">
+          {slideUrls.map((url, i) => (
+            <div key={url} className="flex gap-3 rounded-lg border border-base-700 p-3">
+              <img src={url} alt={`Slide ${i + 1}`} className="h-20 w-32 shrink-0 rounded object-cover" />
+              <div className="flex-1">
+                <label className="text-xs text-slate-400">Slide {i + 1} — texto a ser narrado</label>
+                <textarea
+                  className="input-field mt-1 min-h-[70px] w-full resize-y"
+                  placeholder="Deixe em branco para pular este slide (sem narração)"
+                  value={narrations[i] ?? ""}
+                  onChange={(e) => updateNarration(i, e.target.value)}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {slideUrls.length > 0 && (
+        <>
+          <div className="mt-4">
+            <TtsEngineAndVoiceFields {...selection} />
+          </div>
+
+          <div className="mt-3">
+            <label className="text-xs text-slate-400">
+              Velocidade ({selection.engine === "edge" ? "% de ajuste, ex: 20 ou -20" : "palavras por minuto, ex: 150"})
+            </label>
+            <input
+              className="input-field mt-1"
+              placeholder="em branco = padrão"
+              value={rate}
+              onChange={(e) => setRate(e.target.value)}
+            />
+          </div>
+
+          <div className="mt-4">
+            <label className="text-xs font-medium text-slate-300">Orientação</label>
+            <div className="mt-1 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className={`rounded-lg border px-3 py-2 text-sm ${
+                  orientation === "horizontal"
+                    ? "border-accent bg-accent-muted/40 text-slate-100"
+                    : "border-base-600 text-slate-400"
+                }`}
+                onClick={() => setOrientation("horizontal")}
+              >
+                Horizontal (YouTube)
+              </button>
+              <button
+                type="button"
+                className={`rounded-lg border px-3 py-2 text-sm ${
+                  orientation === "vertical"
+                    ? "border-accent bg-accent-muted/40 text-slate-100"
+                    : "border-base-600 text-slate-400"
+                }`}
+                onClick={() => setOrientation("vertical")}
+              >
+                Vertical (Reels/Shorts)
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-2">
+            <Toggle checked={subtitlesEnabled} onChange={setSubtitlesEnabled} label="Legendas" description="Queima o texto narrado como legenda" />
+            {subtitlesEnabled && (
+              <div className="mt-1 grid grid-cols-2 gap-2 pl-1">
+                <button
+                  type="button"
+                  className={`rounded-lg border px-3 py-1.5 text-xs ${
+                    subtitleStyle === "static"
+                      ? "border-accent bg-accent-muted/40 text-slate-100"
+                      : "border-base-600 text-slate-400"
+                  }`}
+                  onClick={() => setSubtitleStyle("static")}
+                >
+                  Estática
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-lg border px-3 py-1.5 text-xs ${
+                    subtitleStyle === "karaoke"
+                      ? "border-accent bg-accent-muted/40 text-slate-100"
+                      : "border-base-600 text-slate-400"
+                  }`}
+                  onClick={() => setSubtitleStyle("karaoke")}
+                >
+                  Animada (karaokê)
+                </button>
+              </div>
+            )}
+            {subtitlesEnabled && subtitleStyle === "karaoke" && selection.engine !== "edge" && (
+              <p className="mt-1 pl-1 text-xs text-amber-400">
+                Legenda animada precisa do motor "Neural (Edge)" — com o motor local, sai estática mesmo assim.
+              </p>
+            )}
+          </div>
+
+          {bumperStatus?.has_intro && (
+            <Toggle checked={useIntro} onChange={setUseIntro} label="Usar abertura" description="O vídeo de abertura já cadastrado em Texto para Vídeo" />
+          )}
+          {bumperStatus?.has_outro && (
+            <Toggle checked={useOutro} onChange={setUseOutro} label="Usar encerramento" description="O vídeo de encerramento já cadastrado em Texto para Vídeo" />
+          )}
+          {(bumperStatus?.webcam_clips.length ?? 0) > 0 && (
+            <>
+              <Toggle
+                checked={useWebcam}
+                onChange={setUseWebcam}
+                label="Sobrepor clipe de webcam/reação"
+                description={`${bumperStatus?.webcam_clips.length} clipe(s) salvo(s) — um é sorteado a cada geração`}
+              />
+              {useWebcam && (
+                <select
+                  className="input-field mt-1"
+                  value={webcamPosition}
+                  onChange={(e) => setWebcamPosition(e.target.value as api.WebcamPosition)}
+                >
+                  <option value="bottom-right">Canto inferior direito</option>
+                  <option value="bottom-left">Canto inferior esquerdo</option>
+                  <option value="top-right">Canto superior direito</option>
+                  <option value="top-left">Canto superior esquerdo</option>
+                </select>
+              )}
+            </>
+          )}
+
+          <Button className="mt-4" onClick={handleGenerate} disabled={!canSubmit || busy}>
+            {busy ? "Gerando..." : "Gerar vídeo"}
+          </Button>
+        </>
+      )}
+
+      {status && <p className="mt-3 text-sm text-slate-400">{status}</p>}
+
+      {videoUrl && (
+        <div className="mt-3 space-y-2">
+          <video src={videoUrl} controls className="max-h-[60vh] w-full max-w-md rounded-lg" />
+          <Button variant="secondary" onClick={() => window.open(videoUrl, "_blank")}>
+            <Download className="h-4 w-4" /> Baixar vídeo
+          </Button>
         </div>
       )}
     </Card>

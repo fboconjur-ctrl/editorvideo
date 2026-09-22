@@ -49,6 +49,7 @@ from pipeline.bumpers import (
     remove_webcam_clip,
     save_bumper,
 )
+from pipeline.slides import SlidesConversionError, generate_video_from_slides, render_pptx_to_images
 from pipeline.tts import list_edge_voices_async, list_local_voices, synthesize_speech
 from pipeline.upscale import upscale
 from pipeline.youtube import download_audio
@@ -948,6 +949,155 @@ async def download_text_to_video(job_id: str) -> FileResponse:
 async def download_text_to_video_log(job_id: str) -> FileResponse:
     job = TEXT_TO_VIDEO_JOBS[job_id]
     return FileResponse(job.result_log, filename="buscas_de_imagem.log.txt")
+
+
+# --- Apresentação (PPTX) para Vídeo -----------------------------------------
+# Fluxo bem diferente do "Texto para Vídeo": aqui não tem nenhuma busca
+# automática de mídia — a "imagem" de cada trecho já é o próprio slide
+# renderizado do arquivo enviado, e o usuário escreve manualmente o texto
+# que vai ser narrado em cada slide.
+
+class SlidesUploadInfo(BaseModel):
+    upload_id: str
+    slide_urls: list[str]
+
+
+@app.post("/api/slides-to-video/upload")
+def upload_slides(file: UploadFile = File(...)) -> SlidesUploadInfo:
+    """`def` (não `async def`) de propósito: a conversão via LibreOffice é
+    um subprocess bloqueante que pode levar vários segundos — se essa rota
+    fosse `async def` sem `await` de verdade, travaria a única thread do
+    event loop e o site inteiro pararia de responder até terminar (mesmo
+    bug já corrigido antes nas rotas de busca de imagem do Texto para
+    Vídeo)."""
+    upload_id = str(uuid.uuid4())
+    upload_dir = UPLOADS_DIR / "slides" / upload_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    pptx_path = upload_dir / "apresentacao.pptx"
+    with pptx_path.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    try:
+        image_paths = render_pptx_to_images(pptx_path, upload_dir / "slides")
+    except SlidesConversionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    slide_urls = [
+        f"/api/slides-to-video/slide-image/{upload_id}/{p.name}" for p in image_paths
+    ]
+    return SlidesUploadInfo(upload_id=upload_id, slide_urls=slide_urls)
+
+
+@app.get("/api/slides-to-video/slide-image/{upload_id}/{filename}")
+async def get_slide_image(upload_id: str, filename: str) -> FileResponse:
+    slides_root = (UPLOADS_DIR / "slides").resolve()
+    path = (slides_root / upload_id / "slides" / filename).resolve()
+    if not path.is_relative_to(slides_root) or not path.exists():
+        raise HTTPException(status_code=404, detail="Slide não encontrado")
+    return FileResponse(path)
+
+
+SlidesToVideoStatus = Literal["queued", "generating", "done", "error"]
+
+
+class SlidesToVideoJob(BaseModel):
+    id: str
+    status: SlidesToVideoStatus = "queued"
+    error: str | None = None
+    result_video: str | None = None
+
+
+SLIDES_TO_VIDEO_JOBS: dict[str, SlidesToVideoJob] = {}
+
+
+def _run_slides_to_video(
+    job_id: str,
+    slide_image_paths: list[Path],
+    narrations: list[str],
+    engine: str,
+    voice_id: str | None,
+    rate: int | None,
+    subtitles_enabled: bool,
+    subtitle_style: str,
+    orientation: str,
+    use_intro: bool,
+    use_outro: bool,
+    use_webcam: bool,
+    webcam_position: str,
+) -> None:
+    job = SLIDES_TO_VIDEO_JOBS[job_id]
+    try:
+        job.status = "generating"
+        job_dir = OUTPUTS_DIR / job_id
+        job_dir.mkdir(exist_ok=True)
+        output_path = job_dir / "video.mp4"
+
+        generate_video_from_slides(
+            slide_image_paths, narrations, output_path,
+            tts_engine=engine, voice_id=voice_id, rate=rate,
+            subtitles_enabled=subtitles_enabled, subtitle_style=subtitle_style,
+            orientation=orientation,
+            intro_video_path=get_bumper_path("intro") if use_intro else None,
+            outro_video_path=get_bumper_path("outro") if use_outro else None,
+            webcam_video_path=get_random_webcam_clip() if use_webcam else None,
+            webcam_position=webcam_position,
+        )
+
+        job.result_video = str(output_path)
+        job.status = "done"
+    except Exception as exc:  # noqa: BLE001
+        job.status = "error"
+        job.error = str(exc)
+
+
+@app.post("/api/slides-to-video")
+async def create_slides_to_video(
+    background_tasks: BackgroundTasks,
+    upload_id: str = Form(...),
+    narrations: str = Form(...),
+    engine: str = Form("edge"),
+    voice_id: str = Form(""),
+    rate: int = Form(0),
+    subtitles_enabled: bool = Form(False),
+    subtitle_style: str = Form("static"),
+    orientation: str = Form("horizontal"),
+    use_intro: bool = Form(True),
+    use_outro: bool = Form(True),
+    use_webcam: bool = Form(True),
+    webcam_position: str = Form("bottom-right"),
+) -> SlidesToVideoJob:
+    """`narrations`: JSON com uma lista de strings, uma por slide (na
+    mesma ordem devolvida por /api/slides-to-video/upload) — o texto que
+    vai ser narrado naquele slide. Slides com texto vazio são pulados."""
+    slides_dir = UPLOADS_DIR / "slides" / upload_id / "slides"
+    if not slides_dir.exists():
+        raise HTTPException(status_code=404, detail="upload_id não encontrado")
+    slide_image_paths = sorted(slides_dir.glob("slide_*.png"))
+
+    narration_list: list[str] = json.loads(narrations)
+    if len(narration_list) != len(slide_image_paths):
+        raise HTTPException(status_code=400, detail="Número de textos não bate com o número de slides")
+
+    job_id = str(uuid.uuid4())
+    job = SlidesToVideoJob(id=job_id)
+    SLIDES_TO_VIDEO_JOBS[job_id] = job
+    background_tasks.add_task(
+        _run_slides_to_video, job_id, slide_image_paths, narration_list, engine, voice_id.strip() or None,
+        rate or None, subtitles_enabled, subtitle_style, orientation, use_intro, use_outro, use_webcam,
+        webcam_position,
+    )
+    return job
+
+
+@app.get("/api/slides-to-video/{job_id}")
+async def get_slides_to_video(job_id: str) -> SlidesToVideoJob:
+    return SLIDES_TO_VIDEO_JOBS[job_id]
+
+
+@app.get("/api/slides-to-video/{job_id}/video")
+async def download_slides_to_video(job_id: str) -> FileResponse:
+    job = SLIDES_TO_VIDEO_JOBS[job_id]
+    return FileResponse(job.result_video, filename="video.mp4")
 
 
 # --- Frontend ---------------------------------------------------------------

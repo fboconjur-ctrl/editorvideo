@@ -39,6 +39,18 @@ if errorlevel 1 (
 )
 echo [OK] ffmpeg encontrado.
 
+REM --- Verifica LibreOffice (opcional: so' necessario pra "Apresentacao para Video") ---
+where soffice >nul 2>nul
+if errorlevel 1 (
+    echo [AVISO] LibreOffice nao encontrado no PATH. A funcao "Apresentacao
+    echo ^(PPTX^) para Video" nao vai funcionar sem ele; as demais funcoes do
+    echo editor continuam normais. Para usar essa funcao, instale gratis em
+    echo https://www.libreoffice.org/download/download/ e abra um novo
+    echo PowerShell depois.
+) else (
+    echo [OK] LibreOffice encontrado.
+)
+
 REM --- Verifica se o ffmpeg tem o filtro vidstab (estabilizacao de video) ---
 REM Se nao tiver (build "essentials"), baixa automaticamente um build
 REM "full" e usa ele so nesta sessao (nao mexe no PATH permanente do Windows).
