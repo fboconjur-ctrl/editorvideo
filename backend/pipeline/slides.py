@@ -8,6 +8,7 @@ renderizar o slide fielmente — não precisa estar aberto/visível) pra
 gerar um PDF, e depois a biblioteca PyMuPDF pra transformar cada página
 do PDF numa imagem PNG. Isso evita reimplementar um renderizador de
 slides (fontes, temas, gráficos, imagens embutidas) do zero."""
+import os
 import shutil
 import subprocess
 import tempfile
@@ -31,14 +32,43 @@ from .tts import WordTiming, synthesize_speech, synthesize_speech_edge_with_word
 
 class SlidesConversionError(Exception):
     """Erro ao converter o .pptx em imagens (ex: LibreOffice não
-    instalado/encontrado no PATH)."""
+    instalado/encontrado)."""
+
+
+# O instalador do LibreOffice no Windows NÃO adiciona "soffice" ao PATH
+# automaticamente (diferente do que o instalador do ffmpeg costuma
+# exigir manualmente, mas pelo menos avisa) — por isso `shutil.which`
+# sozinho falha mesmo com o programa instalado corretamente. Como
+# fallback, procura direto nos caminhos padrão de instalação em cada
+# sistema operacional antes de desistir.
+_LIBREOFFICE_FALLBACK_PATHS = [
+    r"C:\Program Files\LibreOffice\program\soffice.exe",
+    r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    "/usr/bin/soffice",
+    "/usr/local/bin/soffice",
+    "/snap/bin/libreoffice",
+]
+
+
+def _find_soffice() -> str | None:
+    found = shutil.which("soffice") or shutil.which("libreoffice")
+    if found:
+        return found
+    for candidate in _LIBREOFFICE_FALLBACK_PATHS:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 def render_pptx_to_images(pptx_path: Path, out_dir: Path, dpi: int = 150) -> list[Path]:
-    if shutil.which("soffice") is None:
+    soffice_bin = _find_soffice()
+    if soffice_bin is None:
         raise SlidesConversionError(
-            "LibreOffice não foi encontrado no PATH. Instale gratuitamente em "
-            "https://www.libreoffice.org/download/download/ e tente de novo "
+            "LibreOffice não foi encontrado (nem no PATH, nem na pasta padrão de "
+            "instalação). Instale gratuitamente em "
+            "https://www.libreoffice.org/download/download/, aceite o local de "
+            "instalação padrão sugerido pelo instalador, e tente de novo "
             "(precisa apenas estar instalado, não abrir o programa)."
         )
 
@@ -46,7 +76,7 @@ def render_pptx_to_images(pptx_path: Path, out_dir: Path, dpi: int = 150) -> lis
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         cmd = [
-            "soffice", "--headless", "--norestore",
+            soffice_bin, "--headless", "--norestore",
             "--convert-to", "pdf", "--outdir", str(tmp), str(pptx_path),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)

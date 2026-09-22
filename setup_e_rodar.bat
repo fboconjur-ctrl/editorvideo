@@ -40,13 +40,17 @@ if errorlevel 1 (
 echo [OK] ffmpeg encontrado.
 
 REM --- Verifica LibreOffice (opcional: so' necessario pra "Apresentacao para Video") ---
+REM O instalador do LibreOffice no Windows nao adiciona "soffice" ao PATH
+REM automaticamente, entao "where" sozinho nao basta - o backend tambem
+REM procura direto na pasta padrao de instalacao (Program Files), entao
+REM esse aviso aqui e so informativo (nao bloqueia o resto do setup).
 where soffice >nul 2>nul
-if errorlevel 1 (
-    echo [AVISO] LibreOffice nao encontrado no PATH. A funcao "Apresentacao
-    echo ^(PPTX^) para Video" nao vai funcionar sem ele; as demais funcoes do
-    echo editor continuam normais. Para usar essa funcao, instale gratis em
-    echo https://www.libreoffice.org/download/download/ e abra um novo
-    echo PowerShell depois.
+if errorlevel 1 if not exist "C:\Program Files\LibreOffice\program\soffice.exe" if not exist "C:\Program Files (x86)\LibreOffice\program\soffice.exe" (
+    echo [AVISO] LibreOffice nao encontrado. A funcao "Apresentacao ^(PPTX^)
+    echo para Video" nao vai funcionar sem ele; as demais funcoes do editor
+    echo continuam normais. Para usar essa funcao, instale gratis em
+    echo https://www.libreoffice.org/download/download/ ^(aceite o local de
+    echo instalacao padrao sugerido pelo instalador^).
 ) else (
     echo [OK] LibreOffice encontrado.
 )
