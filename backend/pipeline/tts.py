@@ -84,12 +84,19 @@ _EDGE_FALLBACK_VOICES: list[VoiceInfo] = [
 ]
 
 
-def list_edge_voices() -> list[VoiceInfo]:
-    async def _fetch():
-        return await edge_tts.list_voices()
-
+async def list_edge_voices_async() -> list[VoiceInfo]:
+    """Busca a lista de vozes reais direto da Microsoft. Precisa ser
+    chamada com `await` de dentro de uma rota `async def` — nunca via
+    `asyncio.run()`, que falha com "cannot be called from a running
+    event loop" quando o servidor (uvicorn) já está com um loop rodando.
+    Esse era o bug real por trás de vozes que davam "No audio was
+    received": a versão antiga desta função sempre caía silenciosamente
+    na lista fixa de reserva (o erro do asyncio.run era engolido por um
+    `except Exception` genérico), e alguns IDs dessa lista fixa podem
+    ter sido descontinuados pela Microsoft nesse meio tempo, causando
+    falha só para essas vozes específicas na hora de sintetizar."""
     try:
-        all_voices = asyncio.run(_fetch())
+        all_voices = await edge_tts.list_voices()
     except Exception:  # noqa: BLE001 - qualquer falha de rede cai pra lista fixa
         return _EDGE_FALLBACK_VOICES
 
@@ -98,6 +105,17 @@ def list_edge_voices() -> list[VoiceInfo]:
         if v["Locale"].startswith(_EDGE_LANG_PREFIXES):
             result.append(VoiceInfo(id=v["ShortName"], name=f"{v['FriendlyName']}", languages=[v["Locale"]]))
     return result or _EDGE_FALLBACK_VOICES
+
+
+def list_edge_voices() -> list[VoiceInfo]:
+    """Versão síncrona, para uso fora de uma rota async. Rotas `async def`
+    da API devem usar `list_edge_voices_async` diretamente com `await`."""
+    try:
+        return asyncio.run(list_edge_voices_async())
+    except RuntimeError:
+        # Já existe um event loop rodando nesta thread — não há como
+        # resolver isso de forma síncrona aqui, então cai na lista fixa.
+        return _EDGE_FALLBACK_VOICES
 
 
 def synthesize_speech_edge(text: str, output_path: Path, voice_id: str | None = None, rate: int | None = None) -> None:

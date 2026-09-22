@@ -49,7 +49,7 @@ from pipeline.bumpers import (
     remove_webcam_clip,
     save_bumper,
 )
-from pipeline.tts import list_edge_voices, list_local_voices, synthesize_speech
+from pipeline.tts import list_edge_voices_async, list_local_voices, synthesize_speech
 from pipeline.upscale import upscale
 from pipeline.youtube import download_audio
 
@@ -561,7 +561,7 @@ class VoiceOption(BaseModel):
 
 @app.get("/api/tts/voices")
 async def get_voices(engine: str = "local") -> list[VoiceOption]:
-    voices = list_edge_voices() if engine == "edge" else list_local_voices()
+    voices = await list_edge_voices_async() if engine == "edge" else list_local_voices()
     return [VoiceOption(id=v.id, name=v.name, languages=v.languages) for v in voices]
 
 
