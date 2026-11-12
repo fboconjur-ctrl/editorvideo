@@ -92,6 +92,8 @@ def _cut_by_segments(input_path: Path, output_path: Path, keep_segments: list[tu
         "-i", str(input_path),
         "-filter_complex", filter_complex,
         "-map", "[v]", "-map", "[a]",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
         str(output_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
