@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Fotolivro Social</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700&family=Karla:wght@400;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+/* Layout: workbench — controls column on the left, book spreads on a table surface on the right */
+:root{
+  --bg:#eef0ec; --surface:#fbfcfa; --fg:#1d2420; --muted:#5d6a62; --line:#d5dbd5;
+  --accent:#2f6b4f; --accent-fg:#fff; --table:#dfe3dc;
+  --display:"Fraunces",Georgia,serif; --body:"Karla",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#141917; --surface:#1d2420; --fg:#e7ece8; --muted:#9aa89f; --line:#2f3934;
+  --accent:#7cc3a0; --accent-fg:#0f1513; --table:#0f1311; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141917; --surface:#1d2420; --fg:#e7ece8; --muted:#9aa89f; --line:#2f3934;
+  --accent:#7cc3a0; --accent-fg:#0f1513; --table:#0f1311; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.5}
+.wrap{max-width:1200px;margin:0 auto;padding-block:28px 60px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header h1{font-family:var(--display);font-size:clamp(28px,4vw,40px);margin:0;text-wrap:balance}
+header p{color:var(--muted);margin:6px 0 24px;max-width:62ch}
+.grid{display:grid;grid-template-columns:320px 1fr;gap:24px;align-items:start}
+@media (max-width:820px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:16px}
+.panel h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0}
+label{display:flex;flex-direction:column;gap:4px;font-weight:600;font-size:13px}
+input[type=text],select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+.drop{border:1.5px dashed var(--line);border-radius:8px;padding:14px;text-align:center;color:var(--muted);font-size:13px;cursor:pointer}
+.drop:hover,.drop.on{border-color:var(--accent);color:var(--fg)}
+.drop strong{display:block;color:var(--fg);font-size:14px}
+button{font:inherit;font-weight:600;border:0;border-radius:6px;padding:10px 14px;cursor:pointer;background:var(--accent);color:var(--accent-fg)}
+button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button:focus-visible,input:focus-visible,select:focus-visible,.drop:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stat{font-size:13px;color:var(--muted)}
+.table{background:var(--table);border-radius:10px;padding:24px;display:flex;flex-direction:column;gap:28px;min-width:0}
+.spread{display:flex;justify-content:center;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+.spread canvas{width:50%;height:auto;display:block;background:#fff}
+.spread.single canvas{width:50%}
+.spread canvas:first-child{box-shadow:inset -12px 0 18px -12px rgba(0,0,0,.3)}
+.pgno{text-align:center;font-size:12px;color:var(--muted);margin-top:-18px;font-variant-numeric:tabular-nums}
+.note{font-size:12px;color:var(--muted)}
+.sel{display:flex;flex-wrap:wrap;gap:4px;max-height:180px;overflow:auto}
+.sel img{width:44px;height:44px;object-fit:cover;border-radius:3px;cursor:pointer;opacity:1}
+.sel img.off{opacity:.25}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Fotolivro Social</h1>
+    <p>Transforme suas postagens do Instagram num livro impresso. Envie o arquivo de exportação do Instagram (ou suas fotos), escolha o estilo e baixe o PDF pronto para gráfica, em formato quadrado 20×20 cm.</p>
+  </header>
+  <div class="grid">
+    <aside class="panel">
+      <h2>1 · Suas postagens</h2>
+      <button id="igBtn">Entrar com Instagram e puxar tudo</button>
+      <div class="drop" id="dropZip" tabindex="0" role="button">
+        <strong>Exportação do Instagram (.zip)</strong>
+        Instagram → Configurações → Central de Contas → Baixar suas informações → formato JSON
+      </div>
+      <input type="file" id="zipIn" accept=".zip" hidden>
+      <div class="drop" id="dropImg" tabindex="0" role="button">
+        <strong>Ou envie fotos avulsas</strong>JPG ou PNG, várias de uma vez
+      </div>
+      <input type="file" id="imgIn" accept="image/*" multiple hidden>
+      <div class="stat" id="stat"></div>
+      <div class="sel" id="sel" title="Clique numa foto para incluir ou tirar do livro"></div>
+
+      <h2>2 · Livro</h2>
+      <label for="tTitle">Título da capa<input type="text" id="tTitle" value="Meu ano em fotos"></label>
+      <label for="tUser">Perfil<input type="text" id="tUser" value="@seuperfil"></label>
+      <label for="tLayout">Diagramação
+        <select id="tLayout">
+          <option value="mix">Variada: cada página de um jeito</option>
+          <option value="one">Uma postagem por página</option>
+        </select></label>
+      <label for="tOrder">Ordem
+        <select id="tOrder"><option value="asc">Mais antigas primeiro</option><option value="desc">Mais recentes primeiro</option></select></label>
+      <label for="tTheme">Papel
+        <select id="tTheme"><option value="white">Branco</option><option value="cream">Marfim</option><option value="black">Preto</option></select></label>
+
+      <h2>3 · Imprimir</h2>
+      <button id="pdfBtn">Baixar PDF para impressão</button>
+      <p class="note" id="pdfNote">Gera um PDF com 300 dpi e páginas de 20×20 cm. Total de páginas é arredondado para múltiplo de 4, como pedem as gráficas.</p>
+    </aside>
+    <section class="table" id="book" aria-label="Prévia do livro"></section>
+  </div>
+</div>
+
+<script>
+const S = 1200;            // pixels por página na prévia (PDF usa 2362 = 20cm a 300dpi)
+let posts = [];             // {img:HTMLImageElement, caption, date:Date, on:true}
+
+const $ = id => document.getElementById(id);
+const fmtDate = d => d.toLocaleDateString('pt-BR',{day:'numeric',month:'long',year:'numeric'});
+
+// ---------- exemplos para a primeira visualização ----------
+function sampleImg(h1,h2,seed){
+  const c=document.createElement('canvas');c.width=c.height=800;const x=c.getContext('2d');
+  const g=x.createLinearGradient(0,0,800,800);g.addColorStop(0,`hsl(${h1} 55% 62%)`);g.addColorStop(1,`hsl(${h2} 50% 38%)`);
+  x.fillStyle=g;x.fillRect(0,0,800,800);
+  x.fillStyle='rgba(255,255,255,.18)';
+  for(let i=0;i<6;i++){x.beginPath();x.arc((seed*97+i*173)%800,(seed*53+i*211)%800,60+((seed+i)*37)%140,0,7);x.fill()}
+  const im=new Image();im.src=c.toDataURL('image/jpeg',.85);return im;
+}
+function loadSamples(){
+  const caps=['Primeiro dia de praia do ano 🌊','Café da manhã de domingo','Trilha até o mirante, valeu cada passo','Aniversário da vó Lurdes 🎂','Pôr do sol na varanda','Viagem de carro com a turma','Feira de sábado','Jardim florindo'];
+  posts=[...caps,...caps].map((c,i)=>({img:sampleImg(20+i*40,200+i*25,i+1),caption:c+' (exemplo)',date:new Date(2026,i%12,3+i),on:true}));
+}
+
+// ---------- importação ----------
+const fixText = s => { try { return decodeURIComponent(escape(s)); } catch { return s; } }; // Instagram exporta UTF-8 como latin1
+function loadImage(src){return new Promise((ok,err)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=err;i.src=src;});}
+
+async function importZip(file){
+  $('stat').textContent='Lendo exportação…';
+  const zip=await JSZip.loadAsync(file);
+  const jsonFiles=Object.keys(zip.files).filter(n=>/posts_\d+\.json$/.test(n));
+  if(!jsonFiles.length){$('stat').textContent='Não encontrei posts_1.json. Confira se a exportação foi feita em formato JSON e inclui “Publicações”.';return;}
+  const out=[];
+  for(const jf of jsonFiles){
+    const data=JSON.parse(await zip.file(jf).async('string'));
+    for(const p of data){
+      const media=p.media||[];
+      const caption=fixText(p.title||media[0]?.title||'');
+      const ts=p.creation_timestamp||media[0]?.creation_timestamp;
+      for(const m of media){
+        if(!/\.(jpe?g|png|webp|heic)$/i.test(m.uri))continue; // vídeos ficam de fora
+        const f=zip.file(m.uri)||zip.file(Object.keys(zip.files).find(k=>k.endsWith(m.uri))||'');
+        if(!f)continue;
+        const url=URL.createObjectURL(await f.async('blob'));
+        try{out.push({img:await loadImage(url),caption,date:new Date((m.creation_timestamp||ts)*1000),on:true});}catch{}
+        break; // usa a primeira foto de cada carrossel
+      }
+    }
+  }
+  posts=out;
+  $('stat').textContent=`${posts.length} postagens importadas.`;
+  render();
+}
+async function importImages(files){
+  const out=[];
+  for(const f of files){try{out.push({img:await loadImage(URL.createObjectURL(f)),caption:f.name.replace(/\.[^.]+$/,''),date:new Date(f.lastModified),on:true});}catch{}}
+  posts=out;$('stat').textContent=`${posts.length} fotos carregadas. As legendas usam o nome do arquivo.`;render();
+}
+
+// ---------- login com Instagram (funções em netlify/functions) ----------
+const redirectUri=location.origin+location.pathname;
+async function igLogin(){
+  try{
+    const {clientId}=await fetch('/.netlify/functions/ig-config').then(r=>r.json());
+    if(!clientId)throw 0;
+    location.href=`https://www.instagram.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=instagram_business_basic`;
+  }catch{$('stat').textContent='O login com Instagram ainda não está configurado neste site (falta o app da Meta).';}
+}
+async function igImport(code){
+  history.replaceState(null,'',redirectUri);
+  $('stat').textContent='Buscando todas as postagens do perfil…';
+  const r=await fetch('/.netlify/functions/ig-media',{method:'POST',body:JSON.stringify({code,redirect:redirectUri})}).then(r=>r.json());
+  if(r.error){$('stat').textContent=r.error;return;}
+  if(r.username)$('tUser').value='@'+r.username;
+  const out=[];let n=0;
+  for(const p of r.posts){
+    try{out.push({img:await loadImage('/.netlify/functions/ig-image?u='+encodeURIComponent(p.url)),caption:p.caption,date:new Date(p.timestamp),on:true});}catch{}
+    if(++n%10===0)$('stat').textContent=`Baixando fotos: ${n} de ${r.posts.length}…`;
+  }
+  posts=out;$('stat').textContent=`${posts.length} postagens importadas de @${r.username}.`;render();
+}
+
+// ---------- desenho das páginas ----------
+const themes={white:{bg:'#ffffff',fg:'#1d1d1b',mu:'#8a8a85'},cream:{bg:'#f6f0e3',fg:'#2b2620',mu:'#9b907f'},black:{bg:'#121212',fg:'#f2f2f2',mu:'#8d8d8d'}};
+
+function cover(ctx,img,x,y,w,h){
+  const r=Math.max(w/img.width,h/img.height),sw=w/r,sh=h/r;
+  ctx.drawImage(img,(img.width-sw)/2,(img.height-sh)/2,sw,sh,x,y,w,h);
+}
+function wrapText(ctx,text,x,y,maxW,lh,maxLines){
+  const words=text.split(/\s+/);let line='',n=0;
+  for(let i=0;i<words.length;i++){
+    const t=line?line+' '+words[i]:words[i];
+    if(ctx.measureText(t).width>maxW&&line){
+      if(++n===maxLines){ctx.fillText(line+'…',x,y);return;}
+      ctx.fillText(line,x,y);y+=lh;line=words[i];
+    } else line=t;
+  }
+  if(line)ctx.fillText(line,x,y);
+}
+function drawPost(ctx,p,x,y,w,h,s,th){
+  if(h<s*0.4||w<s*0.3){ // célula pequena: só a foto e a data por cima
+    cover(ctx,p.img,x,y,w,h);
+    ctx.fillStyle='rgba(0,0,0,.35)';ctx.fillRect(x,y+h-s*0.04,w,s*0.04);
+    ctx.fillStyle='#fff';ctx.font=`600 ${Math.round(s*0.016)}px Karla, sans-serif`;
+    ctx.fillText(p.date.toLocaleDateString('pt-BR',{day:'numeric',month:'short'}).toUpperCase(),x+s*0.012,y+h-s*0.013);
+    return;
+  }
+  const capH=h*0.16;
+  cover(ctx,p.img,x,y,w,h-capH);
+  ctx.fillStyle=th.mu;ctx.font=`600 ${Math.round(s*0.022)}px Karla, sans-serif`;
+  ctx.fillText(fmtDate(p.date).toUpperCase(),x,y+h-capH+s*0.04);
+  ctx.fillStyle=th.fg;ctx.font=`${Math.round(s*0.028)}px Fraunces, Georgia, serif`;
+  wrapText(ctx,p.caption,x,y+h-capH+s*0.08,w,s*0.036,w<s*0.5?1:2);
+}
+// Modelos de página: células [x, y, largura, altura] em frações da área útil.
+const TEMPLATES=[
+  {cells:[[0,0,1,1]]},                                              // 0 uma grande com legenda
+  {cells:[[0,0,1,1]],bleed:true},                                   // 1 foto sangrada
+  {cells:[[0,.18,.5,.64],[.5,.18,.5,.64]]},                         // 2 duas lado a lado
+  {cells:[[0,0,1,.6],[0,.6,.5,.4],[.5,.6,.5,.4]]},                  // 3 grande em cima, duas embaixo
+  {cells:[[0,0,.6,1],[.6,0,.4,.5],[.6,.5,.4,.5]]},                  // 4 alta à esquerda, duas à direita
+  {cells:[[0,0,.5,.5],[.5,0,.5,.5],[0,.5,1,.5]]},                   // 5 duas em cima, panorâmica embaixo
+  {cells:[[0,0,2/3,2/3],[2/3,0,1/3,1/3],[2/3,1/3,1/3,1/3],[0,2/3,1/3,1/3],[1/3,2/3,1/3,1/3],[2/3,2/3,1/3,1/3]]}, // 6 mosaico
+  {cells:[[0,0,1/3,1],[1/3,0,1/3,1],[2/3,0,1/3,1]]},                // 7 três colunas
+  {cells:[[0,0,.4,.4],[.4,0,.6,.4],[0,.4,.6,.6],[.6,.4,.4,.6]]},    // 8 quatro desencontradas
+];
+const SEQ=[1,3,0,4,6,2,5,1,8,7,0,4,3,6,5,2];
+
+function makePages(s){
+  const th=themes[$('tTheme').value],layout=$('tLayout').value;
+  let list=posts.filter(p=>p.on).sort((a,b)=>a.date-b.date);
+  if($('tOrder').value==='desc')list.reverse();
+  const pages=[];
+  const page=fn=>{const c=document.createElement('canvas');c.width=c.height=s;const x=c.getContext('2d');x.fillStyle=th.bg;x.fillRect(0,0,s,s);x.textBaseline='alphabetic';fn(x);pages.push(c);};
+  // capa
+  page(x=>{
+    if(list[0])cover(x,list[0].img,0,0,s,s*0.72);
+    x.fillStyle=th.fg;x.font=`700 ${Math.round(s*0.075)}px Fraunces, Georgia, serif`;
+    wrapText(x,$('tTitle').value,s*0.08,s*0.83,s*0.84,s*0.08,2);
+    x.fillStyle=th.mu;x.font=`600 ${Math.round(s*0.03)}px Karla, sans-serif`;
+    const span=list.length?`${list[0].date.getFullYear()}${list.at(-1).date.getFullYear()!==list[0].date.getFullYear()?'–'+list.at(-1).date.getFullYear():''}`:'';
+    x.fillText(`${$('tUser').value}   ${span}   ${list.length} momentos`,s*0.08,s*0.94);
+  });
+  const m=s*0.08,g=s*0.03,inner=s-2*m;
+  let i=0,t=0;
+  while(i<list.length){
+    let tpl=TEMPLATES[0];
+    if(layout==='mix'){
+      const left=list.length-i;
+      // segue a sequência, pulando modelos que precisam de mais fotos do que restam
+      do{tpl=TEMPLATES[SEQ[t++%SEQ.length]];}while(tpl.cells.length>left&&tpl.cells.length>1);
+    }
+    const chunk=list.slice(i,i+tpl.cells.length);i+=chunk.length;
+    page(x=>{
+      if(tpl.bleed){ // foto sangrada ocupando a página inteira, legenda sobre degradê
+        const p=chunk[0];cover(x,p.img,0,0,s,s);
+        const gr=x.createLinearGradient(0,s*0.6,0,s);gr.addColorStop(0,'rgba(0,0,0,0)');gr.addColorStop(1,'rgba(0,0,0,.7)');
+        x.fillStyle=gr;x.fillRect(0,s*0.6,s,s*0.4);
+        x.fillStyle='rgba(255,255,255,.8)';x.font=`600 ${Math.round(s*0.022)}px Karla, sans-serif`;x.fillText(fmtDate(p.date).toUpperCase(),m,s-m-s*0.06);
+        x.fillStyle='#fff';x.font=`${Math.round(s*0.034)}px Fraunces, Georgia, serif`;wrapText(x,p.caption,m,s-m-s*0.01,inner,s*0.042,2);
+        return;
+      }
+      tpl.cells.forEach(([cx,cy,cw,ch],j)=>{
+        if(!chunk[j])return;
+        drawPost(x,chunk[j],m+cx*inner+(cx?g/2:0),m+cy*inner+(cy?g/2:0),cw*inner-(cx?g/2:0)-(cx+cw<1?g/2:0),ch*inner-(cy?g/2:0)-(cy+ch<1?g/2:0),s,th);
+      });
+      x.fillStyle=th.mu;x.font=`${Math.round(s*0.018)}px Karla, sans-serif`;x.textAlign='center';
+      x.fillText(String(pages.length),s/2,s-m*0.4);x.textAlign='left';
+    });
+  }
+  // contracapa + preenchimento até múltiplo de 4
+  while((pages.length+1)%4)page(()=>{});
+  page(x=>{x.fillStyle=th.mu;x.font=`${Math.round(s*0.022)}px Karla, sans-serif`;x.textAlign='center';x.fillText($('tUser').value,s/2,s*0.92);});
+  return pages;
+}
+
+function render(){
+  const pages=makePages(S),book=$('book');book.innerHTML='';
+  // capa sozinha, depois pares, contracapa sozinha
+  const groups=[[0]];for(let i=1;i<pages.length-1;i+=2)groups.push([i,i+1].filter(k=>k<pages.length-1));groups.push([pages.length-1]);
+  for(const gp of groups){
+    const d=document.createElement('div');d.className='spread'+(gp.length===1?' single':'');
+    gp.forEach(k=>d.appendChild(pages[k]));book.appendChild(d);
+    const n=document.createElement('div');n.className='pgno';
+    n.textContent=gp[0]===0?'Capa':gp[0]===pages.length-1?'Contracapa':`Páginas ${gp.join(' e ')}`;book.appendChild(n);
+  }
+  const sel=$('sel');sel.innerHTML='';
+  posts.forEach(p=>{const im=document.createElement('img');im.src=p.img.src;im.alt=p.caption;im.className=p.on?'':'off';
+    im.onclick=()=>{p.on=!p.on;render();};sel.appendChild(im);});
+  $('pdfBtn').textContent=`Baixar PDF para impressão (${pages.length} páginas)`;
+}
+
+async function exportPdf(){
+  const btn=$('pdfBtn');btn.disabled=true;btn.textContent='Gerando PDF…';
+  try{
+    const pages=makePages(2362);const {jsPDF}=window.jspdf;
+    const doc=new jsPDF({unit:'mm',format:[200,200]});
+    pages.forEach((c,i)=>{if(i)doc.addPage([200,200]);doc.addImage(c.toDataURL('image/jpeg',.92),'JPEG',0,0,200,200);});
+    doc.save('fotolivro.pdf');
+  }catch(e){$('pdfNote').textContent='Não foi possível gerar o PDF aqui. Abra esta página no navegador a partir do arquivo index.html e tente de novo.';}
+  btn.disabled=false;render();
+}
+
+// ---------- eventos ----------
+function wireDrop(zone,input,handler){
+  zone.onclick=()=>input.click();zone.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();input.click();}};
+  input.onchange=()=>input.files.length&&handler(input.files);
+  zone.ondragover=e=>{e.preventDefault();zone.classList.add('on');};zone.ondragleave=()=>zone.classList.remove('on');
+  zone.ondrop=e=>{e.preventDefault();zone.classList.remove('on');handler(e.dataTransfer.files);};
+}
+wireDrop($('dropZip'),$('zipIn'),f=>importZip(f[0]).catch(()=>$('stat').textContent='Arquivo .zip inválido.'));
+wireDrop($('dropImg'),$('imgIn'),f=>importImages([...f]));
+['tTitle','tUser','tLayout','tOrder','tTheme'].forEach(id=>$(id).addEventListener('input',render));
+$('pdfBtn').onclick=exportPdf;
+
+$('igBtn').onclick=igLogin;
+
+const igCode=new URLSearchParams(location.search).get('code');
+loadSamples();
+$('stat').textContent='Mostrando 16 postagens de exemplo. Entre com o Instagram para usar as suas.';
+Promise.all(posts.map(p=>p.img.decode())).then(()=>document.fonts.ready).then(render)
+  .then(()=>igCode&&igImport(igCode).catch(()=>$('stat').textContent='Não consegui buscar as postagens. Tente entrar de novo.'));
+</script>
+
+</html>
