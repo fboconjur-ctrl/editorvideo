@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Clapperboard, Scissors, Wrench } from "lucide-react";
+import { BookImage, Clapperboard, Scissors, Wrench } from "lucide-react";
 import { Section } from "./components/ui/Section";
 import { AutoEditorPage } from "./pages/AutoEditorPage";
 import { ManualEditorPage } from "./pages/ManualEditorPage";
 import { ToolsPage } from "./pages/ToolsPage";
 
-type SectionId = "auto" | "manual" | "tools";
+type SectionId = "auto" | "manual" | "tools" | "fotolivro";
 
 export default function App() {
   // Tudo fica na mesma página, sem trocar de tela — só uma seção
@@ -66,6 +66,21 @@ export default function App() {
           onToggle={() => toggle("tools")}
         >
           <ToolsPage />
+        </Section>
+
+        <Section
+          id="section-fotolivro"
+          title="Fotolivro"
+          icon={<BookImage className="h-4 w-4 text-accent" />}
+          expanded={expanded === "fotolivro"}
+          onToggle={() => toggle("fotolivro")}
+        >
+          {/* Ferramenta independente (HTML puro em public/fotolivro), embutida aqui */}
+          <iframe
+            src="/fotolivro/index.html"
+            title="Fotolivro"
+            className="h-[85vh] w-full rounded-xl border border-base-700 bg-white"
+          />
         </Section>
       </main>
     </div>
